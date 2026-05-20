@@ -5,6 +5,8 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Build;
 import android.util.Log;
 
@@ -14,152 +16,262 @@ import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
 import com.google.appinventor.components.runtime.util.YailList;
 
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class FCMService extends FirebaseMessagingService {
 
-    private static final String TAG = "MyFCMService";
-    private static final String CHANNEL_ID = "fcm_default_channel";
-    private static final String CHANNEL_NAME = "Push Notifications";
-    private static final int NOTIF_ID = 1001;
+    private static final String TAG = "FCMService";
 
-    // ----------------------------------------------------------------
-    // Token refresh callback
-    // Called when:
-    // 1. App installs for the first time
-    // 2. User clears app data
-    // 3. User restores app on new device
-    // 4. Firebase rotates tokens (security)
-    // ----------------------------------------------------------------
+    // Increments per notification so each gets a unique ID in the tray
+    private static final AtomicInteger NOTIF_COUNTER = new AtomicInteger(1000);
+
+    // FCM internal system extras — never exposed to blocks
+    private static final List<String> SYSTEM_KEYS = Arrays.asList(
+            "google.message_id", "google.sent_time", "google.ttl",
+            "google.original_message_id", "collapse_key", "from",
+            FCM.KEY_TITLE, FCM.KEY_BODY, FCM.KEY_IMAGE,
+            FCM.KEY_MESSAGE_ID, FCM.KEY_SCREEN
+    );
+
+    // ================================================================
+    // TOKEN REFRESH
+    // ================================================================
+
     @Override
     public void onNewToken(String token) {
         super.onNewToken(token);
-        Log.d(TAG, "New FCM token: " + token);
-
-        // Attempt to dispatch to live extension instance
+        Log.d(TAG, "New token: " + token);
         FCM.dispatchTokenRefreshed(token);
-
-        // Also persist locally for when app is not running.
-        // The extension reads this on next Initialize().
+        // Also persist for when no extension instance is active
         getSharedPreferences("FCMExtPrefs", Context.MODE_PRIVATE)
-                .edit()
-                .putString("fcm_token", token)
-                .apply();
+                .edit().putString("fcm_token", token).apply();
     }
 
-    // ----------------------------------------------------------------
-    // Message received
+    // ================================================================
+    // MESSAGE RECEIVED
     // Called when:
-    // - App is in FOREGROUND: always called
-    // - App is in BACKGROUND: called ONLY for data-only messages
-    //   (notification messages go directly to system tray)
-    // - App is KILLED: called when user taps notification
-    //   (FCM delivers a data message on next app start)
-    // ----------------------------------------------------------------
+    //   FOREGROUND    — always, for all message types
+    //   BACKGROUND    — only for data-only messages
+    //   KILLED        — only for data-only messages
+    // Notification-type messages in background/killed go directly
+    // to the system tray and bypass this method entirely.
+    // ================================================================
+
     @Override
     public void onMessageReceived(RemoteMessage remoteMessage) {
         super.onMessageReceived(remoteMessage);
 
-        Log.d(TAG, "Message received from: " + remoteMessage.getFrom());
-        Log.d(TAG, "Message ID: " + remoteMessage.getMessageId());
-
-        String from = remoteMessage.getFrom() != null ? remoteMessage.getFrom() : "";
+        String from      = remoteMessage.getFrom()      != null ? remoteMessage.getFrom()      : "";
         String messageId = remoteMessage.getMessageId() != null ? remoteMessage.getMessageId() : "";
 
-        // Extract data payload
         Map<String, String> data = remoteMessage.getData();
-        List<String> keys = new ArrayList<>(data.keySet());
+
+        // ── Determine message type ───────────────────────────────────
+        // We always send data-only from the server.
+        // A notification-type message is identified by presence of
+        // fcm_title in the data payload (added by our sender backend).
+        boolean isNotification = data.containsKey(FCM.KEY_TITLE);
+
+        // ── Extract clean user data payload ─────────────────────────
+        List<String> keys   = new ArrayList<>();
         List<String> values = new ArrayList<>();
-        for (String key : keys) {
-            values.add(data.get(key));
+
+        for (Map.Entry<String, String> entry : data.entrySet()) {
+            if (!SYSTEM_KEYS.contains(entry.getKey())) {
+                keys.add(entry.getKey());
+                values.add(entry.getValue() != null ? entry.getValue() : "");
+            }
         }
 
-        YailList keyList = YailList.makeList(keys);
+        YailList keyList   = YailList.makeList(keys);
         YailList valueList = YailList.makeList(values);
 
-        // Dispatch to extension if app is in foreground
-        FCM.dispatchMessageReceived(from, messageId, keyList, valueList);
+        if (isNotification) {
+            // ── Notification-type message ────────────────────────────
+            String title   = data.containsKey(FCM.KEY_TITLE) ? data.get(FCM.KEY_TITLE) : "";
+            String body    = data.containsKey(FCM.KEY_BODY)  ? data.get(FCM.KEY_BODY)  : "";
+            String image   = data.containsKey(FCM.KEY_IMAGE) ? data.get(FCM.KEY_IMAGE) : "";
+            String screen  = data.containsKey(FCM.KEY_SCREEN)? data.get(FCM.KEY_SCREEN): "";
 
-        // If notification payload exists, post a notification
-        // (This handles foreground notification display, which FCM does NOT
-        // do automatically — it only auto-displays in background)
-        if (remoteMessage.getNotification() != null) {
-            RemoteMessage.Notification notif = remoteMessage.getNotification();
-            String title = notif.getTitle() != null ? notif.getTitle() : "";
-            String body = notif.getBody() != null ? notif.getBody() : "";
-            showNotification(title, body, messageId, data);
+            Log.d(TAG, "Notification received: " + title);
+
+            // Always fire the event so blocks can react
+            FCM.dispatchNotificationReceived(from, messageId, title, body, keyList, valueList);
+
+            // Show notification:
+            // In foreground — respect SetShowForegroundNotifications()
+            // In background — always show (this method is only called for data-only
+            //                 messages in background, so always build the notification)
+            boolean appInForeground = isAppInForeground();
+
+            if (!appInForeground || FCM.shouldShowForegroundNotification()) {
+                showNotification(title, body, image, messageId, screen, data);
+            }
+
+        } else {
+            // ── Data-only message ────────────────────────────────────
+            Log.d(TAG, "Data message received");
+            FCM.dispatchMessageReceived(from, messageId, keyList, valueList);
         }
     }
 
-    // ----------------------------------------------------------------
-    // Show a notification (foreground display)
-    // ----------------------------------------------------------------
-    private void showNotification(String title, String body,
-                                  String messageId, Map<String, String> data) {
+    // ================================================================
+    // BUILD AND SHOW NOTIFICATION
+    // ================================================================
+
+    private void showNotification(
+            String title,
+            String body,
+            String imageUrl,
+            String messageId,
+            String targetScreen,
+            Map<String, String> fullData) {
 
         NotificationManager manager =
                 (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
 
-        // Android 8+ requires a channel
+        String channelId   = FCM.getChannelId();
+        String channelName = FCM.getChannelName();
+        String channelDesc = FCM.getChannelDescription();
+
+        // Create channel (Android 8+) — safe to call repeatedly
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
-                    CHANNEL_ID,
-                    CHANNEL_NAME,
-                    NotificationManager.IMPORTANCE_HIGH
-            );
-            channel.setDescription("FCM push notifications");
+                    channelId, channelName, NotificationManager.IMPORTANCE_HIGH);
+            channel.setDescription(channelDesc);
             manager.createNotificationChannel(channel);
         }
 
-        // Build intent to open app when notification is tapped
-        Intent intent = getPackageManager()
+        // ── Build tap intent ─────────────────────────────────────────
+        // Launches the app's main launcher activity.
+        // Passes FCM data as extras so AppOpenedFromNotification fires.
+        Intent tapIntent = getPackageManager()
                 .getLaunchIntentForPackage(getPackageName());
-        if (intent != null) {
-            // Pass data payload so NotificationClicked event can fire
-            for (Map.Entry<String, String> entry : data.entrySet()) {
-                intent.putExtra(entry.getKey(), entry.getValue());
-            }
-            intent.putExtra("fcm_message_id", messageId);
-            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
+        if (tapIntent == null) {
+            // Fallback — build a generic launch intent
+            tapIntent = new Intent();
+            tapIntent.setPackage(getPackageName());
         }
 
+        tapIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+
+        // Pass all data as extras for AppOpenedFromNotification
+        tapIntent.putExtra(FCM.KEY_MESSAGE_ID, messageId);
+        if (!targetScreen.isEmpty()) {
+            tapIntent.putExtra(FCM.KEY_SCREEN, targetScreen);
+        }
+        for (Map.Entry<String, String> entry : fullData.entrySet()) {
+            if (!SYSTEM_KEYS.contains(entry.getKey())) {
+                tapIntent.putExtra(entry.getKey(), entry.getValue());
+            }
+        }
+
+        int requestCode = NOTIF_COUNTER.getAndIncrement();
+
         PendingIntent pendingIntent = PendingIntent.getActivity(
-                this, 0, intent,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                        ? PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
-                        : PendingIntent.FLAG_UPDATE_CURRENT
+                this,
+                requestCode,
+                tapIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT
+                        | PendingIntent.FLAG_IMMUTABLE
         );
 
-        // Use app's own launcher icon for notification
-        int iconRes = getApplicationInfo().icon;
+        // ── Build notification ────────────────────────────────────────
+        int smallIconRes = getApplicationInfo().icon;
 
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(iconRes)
-                .setContentTitle(title)
-                .setContentText(body)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setAutoCancel(true)
-                .setContentIntent(pendingIntent);
+        NotificationCompat.Builder builder =
+                new NotificationCompat.Builder(this, channelId)
+                        .setSmallIcon(smallIconRes)
+                        .setContentTitle(title)
+                        .setContentText(body)
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
+                        .setAutoCancel(true)
+                        .setContentIntent(pendingIntent)
+                        .setStyle(new NotificationCompat.BigTextStyle().bigText(body));
 
-        manager.notify(NOTIF_ID, builder.build());
+        // Large image if imageUrl provided
+        if (imageUrl != null && !imageUrl.isEmpty()) {
+            Bitmap imageBitmap = downloadBitmap(imageUrl);
+            if (imageBitmap != null) {
+                builder.setLargeIcon(imageBitmap)
+                        .setStyle(new NotificationCompat.BigPictureStyle()
+                                .bigPicture(imageBitmap)
+                                .bigLargeIcon((Bitmap) null));  // hide large icon when expanded
+            }
+        }
+
+        manager.notify(requestCode, builder.build());
+        Log.d(TAG, "Notification shown, id: " + NOTIF_COUNTER.get());
     }
 
-    // ----------------------------------------------------------------
-    // Message send error (when using FCM upstream messaging)
-    // ----------------------------------------------------------------
-    @Override
-    public void onSendError(String msgId, Exception exception) {
-        Log.e(TAG, "Error sending message: " + msgId, exception);
+    // ================================================================
+    // DOWNLOAD BITMAP FOR NOTIFICATION IMAGE
+    // ================================================================
+
+    private Bitmap downloadBitmap(String imageUrl) {
+        try {
+            URL url = new URL(imageUrl);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+            conn.setDoInput(true);
+            conn.connect();
+            InputStream stream = conn.getInputStream();
+            Bitmap bitmap = BitmapFactory.decodeStream(stream);
+            stream.close();
+            conn.disconnect();
+            return bitmap;
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to download notification image: " + e.getMessage());
+            return null;
+        }
     }
 
-    // ----------------------------------------------------------------
-    // Message deleted from server (device was offline too long)
-    // FCM only retains messages for 4 weeks
-    // ----------------------------------------------------------------
+    // ================================================================
+    // FOREGROUND DETECTION
+    // Checks if any activity from this app is currently visible.
+    // ================================================================
+
+    private boolean isAppInForeground() {
+        android.app.ActivityManager am =
+                (android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+        if (am == null) return false;
+
+        List<android.app.ActivityManager.RunningAppProcessInfo> processes =
+                am.getRunningAppProcesses();
+        if (processes == null) return false;
+
+        String pkg = getPackageName();
+        for (android.app.ActivityManager.RunningAppProcessInfo proc : processes) {
+            if (proc.processName.equals(pkg)
+                    && proc.importance ==
+                    android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ================================================================
+    // FCM DELIVERY CALLBACKS (optional)
+    // ================================================================
+
     @Override
     public void onDeletedMessages() {
-        Log.w(TAG, "Messages deleted from FCM server. Some messages were not delivered.");
+        Log.w(TAG, "Messages deleted from FCM server — device was offline too long");
+    }
+
+    @Override
+    public void onSendError(String msgId, Exception e) {
+        Log.e(TAG, "Send error for " + msgId + ": " + e.getMessage());
     }
 }
