@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools"
+          package="com.hridoy.fcm">
+
+  <application>
+
+    <!-- Clear out explicit auto-init providers entirely -->
+    <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+
+    <meta-data
+            android:name="firebase_analytics_collection_enabled"
+            android:value="false" />
+
+    <!-- Your FCM service subclass -->
+    <service
+            android:name="com.hridoy.fcm.FCMService"
+            android:exported="false">
+      <intent-filter>
+        <action android:name="com.google.firebase.MESSAGING_EVENT" />
+      </intent-filter>
+    </service>
+
+    <!-- Firebase component discovery mechanism -->
+    <service
+            android:name="com.google.firebase.components.ComponentDiscoveryService"
+            android:exported="false"
+            android:directBootAware="true">
+      <meta-data
+              android:name="com.google.firebase.components:com.google.firebase.messaging.FirebaseMessagingRegistrar"
+              android:value="com.google.firebase.components.ComponentRegistrar" />
+      <meta-data
+              android:name="com.google.firebase.components:com.google.firebase.installations.FirebaseInstallationsRegistrar"
+              android:value="com.google.firebase.components.ComponentRegistrar" />
+      <meta-data
+              android:name="com.google.firebase.components:com.google.firebase.datatransport.TransportRegistrar"
+              android:value="com.google.firebase.components.ComponentRegistrar" />
+    </service>
+
+    <!-- GMS receiver for background state delivery -->
+    <receiver
+            android:name="com.google.firebase.iid.FirebaseInstanceIdReceiver"
+            android:exported="true"
+            android:permission="com.google.android.c2dm.permission.SEND">
+      <intent-filter>
+        <action android:name="com.google.android.c2dm.intent.RECEIVE" />
+      </intent-filter>
+    </receiver>
+
+  </application>
+
+  <!-- Permissions -->
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+</manifest>

@@ -1,0 +1,129 @@
+# Project version 6.1.0 17.05.26.11.03+19 May 26
+# The name of the extension developer.
+author: Hridoy
+
+# Define the minimum Android SDK API level your extension supports.
+min_sdk: 14
+# Define the compile Android SDK API level.
+# compile_sdk: 35
+# Enable to use modern Java (9-25) syntax.
+# syntax: true
+# If enabled, the D8 tool will generate desugared jar (classes.dex)
+desugar_dex: true
+# If enabled, extension will be optimized using R8.
+R8: false
+# If enabled, extension will be optimized using ProGuard.
+proguard: false
+# Define specific ProGuard version.
+# proguard_version: 7.9.1
+# Enable to collect ProGuard rules from runtime AARs (premium).
+# collect_rules: false
+
+# Select resolver tool between `gradle/maven` to fetch transitive dependencies.
+# resolver: gradle
+
+# Default repositories are Maven Central, Google Maven & Maven Local.
+# If the library you want to use is not available in these repositories,
+# add here by specifying their URLs (premium).
+# repositories:
+# - https://jitpack.io/
+
+# Runtime dependencies [Remote and Local]
+# dependencies:
+# - groupId:artifactId:version (premium)
+# - aar-library.aar
+# - jar-library.jar
+
+dependencies:
+  # --- Core Firebase Messaging & Lifecycle Management ---
+  - firebase-messaging-23.4.1.jar
+  - firebase-iid-21.1.0.jar
+  - firebase-iid-interop-17.1.0.jar
+  - firebase-installations-17.2.0.jar
+  - firebase-installations-interop-17.1.1.jar
+  - firebase-measurement-connector-19.0.0.jar
+
+  # --- Google Play Services Backbone ---
+  - play-services-cloud-messaging-17.1.0.jar
+  - play-services-base-18.3.0.jar
+  - play-services-basement-18.3.0.jar
+  - play-services-tasks-18.1.0.jar
+  - play-services-stats-17.0.2.jar
+
+  # --- Data Transport & Initialization ---
+  - firebase-common-20.4.2.jar
+  - firebase-common-ktx-20.4.2.jar
+  - firebase-components-17.1.5.jar
+  - firebase-datatransport-18.1.8.jar
+  - transport-api-3.1.0.jar
+  - transport-runtime-3.1.9.jar
+  - transport-backend-cct-3.1.9.jar
+
+  # --- Serialization & Data Pipelines ---
+  - firebase-encoders-17.0.0.jar
+  - firebase-encoders-json-18.0.1.jar
+  - firebase-encoders-proto-16.0.0.jar
+  - protobuf-javalite-3.25.6.jar
+
+  # --- Asynchronous & Concurrency Utilities ---
+  - concurrent-futures-1.1.0.jar
+  - listenablefuture-1.0.jar
+  - kotlinx-coroutines-core-jvm-1.6.4.jar
+  - kotlinx-coroutines-play-services-1.6.4.jar
+
+  # --- Kotlin Standard Libraries ---
+  - kotlin-stdlib-1.7.10.jar
+  - kotlin-stdlib-common-1.7.10.jar
+  - kotlin-stdlib-jdk7-1.7.10.jar
+  - kotlin-stdlib-jdk8-1.7.10.jar
+
+  # --- Source Code Annotations ---
+  - annotations-13.0.jar
+  - firebase-annotations-16.2.0.jar
+  - error_prone_annotations-2.9.0.jar
+  - javax.inject-1.jar
+
+# Compile-time dependencies [Remote and Local]
+# compile_time:
+# - groupId:artifactId:version (premium)
+# - aar-library.aar
+# - jar-library.jar
+
+# Define dependencies to skip during resolve. [Remote only]
+# excludes:
+# - groupId:artifactId:version (premium)
+
+# Extension assets. [Should be present in assets directory]
+# assets:
+# - my-awesome-asset.anything
+
+# Attach custom XML to bundle it with APK (premium).
+# [Should be present in assets directory within relative child directory]
+# xmls:
+# - targetPath/myfile.xml
+
+# Define AAR libraries to attach with extension. [Remote and Local] (premium)
+# aars:
+# - groupId:artifactId:version
+# - aar-library.aar
+
+# Define AAR libraries to merge manifest from them. [Remote and Local] (premium)
+# manifests:
+# - groupId:artifactId:version
+# - aar-library.aar
+
+# Enable to write docs in Markdown during build. Pass `-b` to generate blocks.
+gen_docs: false
+# Enable to generate blocks with shadow blocks (premium).
+shadow_blocks: false
+# Enable to increment the version number of each component during build.
+auto_version: true
+# Enable to remove @annotations from the extension.
+deannonate: true
+# Enable to skip matching classes provided by AI2.
+filter_mit_classes: false
+
+# Note: Features tagged as `premium` require a premium subscription.
+# To unlock these features and support the development of FAST-CLI,
+# please visit the link below to request access:
+# 🔗 https://buymeacoffee.com/jewelshkjony/extras/222302
