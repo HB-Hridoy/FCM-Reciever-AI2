@@ -380,53 +380,39 @@ public class FCM extends AndroidNonvisibleComponent
 	// ================================================================
 
 	@SimpleFunction(description =
-			"Requests the POST_NOTIFICATIONS runtime permission on Android 13+.\n" +
-					"No-op on Android 12 and below — permission is always granted.\n" +
-					"Call from a button click, not from Screen.Initialize.\n" +
+			"Requests POST_NOTIFICATIONS runtime permission on Android 13+.\n" +
+					"No-op on Android 12 and below.\n" +
+					"Call from a button click — not from Screen.Initialize.\n" +
 					".\n===============================================================\n.\n" +
 					"Callback parameters:\n" +
 					"  1) granted      (boolean: true = already granted, false = dialog shown)\n" +
 					"  2) errorMessage (text: empty if already granted)\n" +
 					".\n" +
-					"Note: callback fires immediately after the dialog is shown.\n" +
-					"Call IsNotificationPermissionGranted() after user responds\n" +
-					"to get the actual result.")
-	public void RequestNotificationPermission(final YailProcedure callback) {
-		if (!validateCallback("RequestNotificationPermission", callback, 2)) return;
+					"Call IsNotificationPermissionGranted() after user responds to get the result.")
+	public void RequestNotificationPermission() {
 
 		if (Build.VERSION.SDK_INT < 33) {
-			fireCallback(callback, Boolean.TRUE, "");
 			return;
 		}
 
 		try {
-			boolean granted = activity.checkSelfPermission(
-					"android.permission.POST_NOTIFICATIONS"
-			) == PackageManager.PERMISSION_GRANTED;
-
-			if (granted) {
-				fireCallback(callback, Boolean.TRUE, "");
+			if (activity.checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED) {
 				return;
 			}
 		} catch (Exception ignored) {}
 
-		activity.requestPermissions(
-				new String[]{"android.permission.POST_NOTIFICATIONS"}, 1001);
+		activity.requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1001);
 
-		fireCallback(callback, Boolean.FALSE,
-				"Permission dialog shown. Call IsNotificationPermissionGranted() after user responds.");
 	}
 
 	@SimpleFunction(description =
 			"Returns true if POST_NOTIFICATIONS permission is granted.\n" +
-					"Always returns true on Android 12 and below.\n" +
-					"Call this after RequestNotificationPermission() to check the actual result.")
+					"Always returns true on Android 12 and below.")
 	public boolean IsNotificationPermissionGranted() {
 		if (Build.VERSION.SDK_INT >= 33) {
 			try {
-				return activity.checkSelfPermission(
-						"android.permission.POST_NOTIFICATIONS"
-				) == PackageManager.PERMISSION_GRANTED;
+				return activity.checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+						== PackageManager.PERMISSION_GRANTED;
 			} catch (Exception e) {
 				return false;
 			}
