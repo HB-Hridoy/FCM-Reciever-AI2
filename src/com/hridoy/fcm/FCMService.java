@@ -12,17 +12,14 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
+import com.google.appinventor.components.runtime.util.YailDictionary;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
-import com.google.appinventor.components.runtime.util.YailList;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class FCMService extends FirebaseMessagingService {
@@ -80,18 +77,13 @@ public class FCMService extends FirebaseMessagingService {
         boolean isNotification = data.containsKey(FCM.KEY_TITLE);
 
         // ── Extract clean user data payload ─────────────────────────
-        List<String> keys   = new ArrayList<>();
-        List<String> values = new ArrayList<>();
-
+        YailDictionary dataDict = new YailDictionary();
         for (Map.Entry<String, String> entry : data.entrySet()) {
             if (!SYSTEM_KEYS.contains(entry.getKey())) {
-                keys.add(entry.getKey());
-                values.add(entry.getValue() != null ? entry.getValue() : "");
+                dataDict.put(entry.getKey(),
+                        entry.getValue() != null ? entry.getValue() : "");
             }
         }
-
-        YailList keyList   = YailList.makeList(keys);
-        YailList valueList = YailList.makeList(values);
 
         if (isNotification) {
             // ── Notification-type message ────────────────────────────
@@ -102,7 +94,7 @@ public class FCMService extends FirebaseMessagingService {
             Log.d(TAG, "Notification received: " + title);
 
             // Always fire the event so blocks can react
-            FCM.dispatchNotificationReceived(from, messageId, title, body, keyList, valueList);
+            FCM.dispatchNotificationReceived(from, messageId, title, body, dataDict);
 
             // Show notification:
             // In foreground — respect SetShowForegroundNotifications()
@@ -117,7 +109,7 @@ public class FCMService extends FirebaseMessagingService {
         } else {
             // ── Data-only message ────────────────────────────────────
             Log.d(TAG, "Data message received");
-            FCM.dispatchMessageReceived(from, messageId, keyList, valueList);
+            FCM.dispatchMessageReceived(from, messageId, dataDict);
         }
     }
 
