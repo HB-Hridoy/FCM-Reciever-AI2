@@ -1,17 +1,7 @@
 package com.hridoy.fcm;
 
-import com.google.appinventor.components.annotations.DesignerComponent;
-import com.google.appinventor.components.annotations.SimpleEvent;
-import com.google.appinventor.components.annotations.SimpleFunction;
-import com.google.appinventor.components.annotations.SimpleObject;
-import com.google.appinventor.components.annotations.SimpleProperty;
-import com.google.appinventor.components.annotations.DesignerProperty;
-import com.google.appinventor.components.runtime.AndroidNonvisibleComponent;
-import com.google.appinventor.components.runtime.Component;
-import com.google.appinventor.components.runtime.ComponentContainer;
-import com.google.appinventor.components.runtime.EventDispatcher;
-import com.google.appinventor.components.runtime.OnDestroyListener;
-import com.google.appinventor.components.runtime.OnResumeListener;
+import com.google.appinventor.components.annotations.*;
+import com.google.appinventor.components.runtime.*;
 import com.google.appinventor.components.runtime.util.YailList;
 import com.google.appinventor.components.runtime.util.YailProcedure;
 
@@ -27,8 +17,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import com.google.android.gms.tasks.OnCompleteListener;
-import com.google.android.gms.tasks.Task;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
 import com.google.firebase.messaging.FirebaseMessaging;
@@ -41,23 +29,19 @@ import java.util.List;
 import java.util.Set;
 
 @DesignerComponent(
-		version = 18,
-		versionName = "2.0.0",
+		version = 22,
+		versionName = "2.2.0",
 		description = "Firebase Cloud Messaging receiver extension. Developed by Hridoy.",
 		iconName = "icon.png"
 )
 public class FCM extends AndroidNonvisibleComponent
-		implements Component, OnDestroyListener, OnResumeListener {
+		implements Component, OnDestroyListener, OnResumeListener, OnNewIntentListener {
 
-	private static final String TAG  = "FCM";
+	private static final String TAG         = "FCM";
+	private static final String PREFS_NAME  = "FCMExtPrefs";
+	private static final String PREF_TOKEN  = "fcm_token";
+	private static final String PREF_TOPICS = "fcm_subscribed_topics";
 
-	// SharedPreferences keys
-	private static final String PREFS_NAME          = "FCMExtPrefs";
-	private static final String PREF_TOKEN          = "fcm_token";
-	private static final String PREF_TOPICS         = "fcm_subscribed_topics";
-	private static final String PREF_SHOW_FG_NOTIF  = "fcm_show_fg_notifications";
-
-	// FCM reserved data keys — set by sender, stripped before exposing to blocks
 	static final String KEY_TITLE      = "fcm_title";
 	static final String KEY_BODY       = "fcm_body";
 	static final String KEY_IMAGE      = "fcm_image";
@@ -67,16 +51,17 @@ public class FCM extends AndroidNonvisibleComponent
 	private static final List<String> SYSTEM_KEYS = Arrays.asList(
 			"google.message_id", "google.sent_time", "google.ttl",
 			"google.original_message_id", "collapse_key", "from",
-			"fcm_message_id", "gcm.notification.body", "gcm.notification.title",
+			KEY_MESSAGE_ID, "gcm.notification.body", "gcm.notification.title",
 			"gcm.notification.image", "android.support.content.wakelockid",
 			"androidx.content.wakelockid",
 			KEY_TITLE, KEY_BODY, KEY_IMAGE
 	);
 
 	// Notification channel config
-	private String channelId          = "fcm_default_channel";
-	private String channelName        = "Push Notifications";
-	private String channelDescription = "App push notifications";
+	private String  channelId          = "fcm_default_channel";
+	private String  channelName        = "Push Notifications";
+	private String  channelDescription = "App push notifications";
+	private boolean showForegroundNotif = true;
 
 	// Static bridge — allows MyFCMService to reach the live extension instance
 	static WeakReference<FCM> activeInstance;
@@ -84,8 +69,7 @@ public class FCM extends AndroidNonvisibleComponent
 	private final Activity          activity;
 	private final Handler           mainHandler;
 	private final SharedPreferences prefs;
-	private boolean initialized           = false;
-	private boolean showForegroundNotif   = true;
+	private boolean initialized = false;
 
 	// ================================================================
 	// CONSTRUCTOR
@@ -98,10 +82,10 @@ public class FCM extends AndroidNonvisibleComponent
 				: container.$form();
 		this.mainHandler = new Handler(Looper.getMainLooper());
 		this.prefs       = activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-		this.showForegroundNotif = prefs.getBoolean(PREF_SHOW_FG_NOTIF, true);
 
 		container.$form().registerForOnDestroy(this);
 		container.$form().registerForOnResume(this);
+		container.$form().registerForOnNewIntent(this);
 		activeInstance = new WeakReference<>(this);
 
 		Log.d(TAG, "FCM constructed");
@@ -149,9 +133,6 @@ public class FCM extends AndroidNonvisibleComponent
 
 			if (FirebaseApp.getApps(activity).isEmpty()) {
 				FirebaseApp.initializeApp(activity, options);
-				Log.d(TAG, "FirebaseApp initialized");
-			} else {
-				Log.d(TAG, "FirebaseApp reused");
 			}
 
 			initialized = true;
@@ -164,34 +145,68 @@ public class FCM extends AndroidNonvisibleComponent
 	}
 
 	// ================================================================
-	// NOTIFICATION CHANNEL CONFIGURATION
+	// GET LAUNCH NOTIFICATION
 	// ================================================================
 
 	@SimpleFunction(description =
-			"Configures the Android notification channel used for all FCM notifications.\n" +
-					"Must be called before the first notification is displayed.\n" +
-					"On Android 7 and below this is a no-op.\n" +
+			"Call this in Screen1.Initialize to check if the app was opened\n" +
+					"by tapping a notification while the app was killed or in background.\n" +
+					".\n===============================================================\n.\n" +
+					"Reads the current launch Intent directly — no static storage,\n" +
+					"works correctly with multiple notifications.\n" +
+					".\n" +
+					"If the app was opened from a notification tap, fires\n" +
+					"AppOpenedFromNotification immediately.\n" +
+					"If the app was opened normally, does nothing.\n" +
+					".\n" +
+					"Recommended call order in Screen1.Initialize:\n" +
+					"  1. call FCM.Initialize(...)\n" +
+					"  2. call FCM.GetLaunchNotification()\n" +
+					"  3. call FCM.GetToken(...)")
+	public void GetLaunchNotification() {
+		Intent intent = activity.getIntent();
+
+		if (intent == null || intent.getExtras() == null) return;
+
+		// Check if this Intent carries FCM notification tap data
+		boolean hasFcmData = intent.hasExtra(KEY_MESSAGE_ID)
+				|| intent.hasExtra("google.message_id");
+
+		if (!hasFcmData) return;
+
+		// Read and dispatch
+		dispatchFromIntent(intent);
+
+		// Clear the Intent so re-entering this screen doesn't re-fire
+		activity.setIntent(new Intent());
+	}
+
+	// ================================================================
+	// NOTIFICATION CHANNEL
+	// ================================================================
+
+	@SimpleFunction(description =
+			"Configures the Android notification channel for all FCM notifications.\n" +
+					"Call before the first notification is displayed.\n" +
+					"No-op on Android 7 and below.\n" +
 					".\n===============================================================\n.\n" +
 					"Parameters:\n" +
-					"  • channelId          — unique identifier (e.g. 'my_channel')\n" +
-					"  • channelName        — visible name shown in system settings\n" +
+					"  • channelId          — unique ID (e.g. 'my_channel')\n" +
+					"  • channelName        — name shown in system settings\n" +
 					"  • channelDescription — description shown in system settings")
 	public void SetNotificationChannel(
-			String channelId,
-			String channelName,
-			String channelDescription) {
+			String channelId, String channelName, String channelDescription) {
 		this.channelId          = channelId;
 		this.channelName        = channelName;
 		this.channelDescription = channelDescription;
 
-		// Create channel immediately if Android 8+
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-			NotificationManager manager =
+			NotificationManager mgr =
 					(NotificationManager) activity.getSystemService(Context.NOTIFICATION_SERVICE);
-			NotificationChannel channel = new NotificationChannel(
+			NotificationChannel ch = new NotificationChannel(
 					channelId, channelName, NotificationManager.IMPORTANCE_HIGH);
-			channel.setDescription(channelDescription);
-			manager.createNotificationChannel(channel);
+			ch.setDescription(channelDescription);
+			mgr.createNotificationChannel(ch);
 		}
 	}
 
@@ -226,10 +241,10 @@ public class FCM extends AndroidNonvisibleComponent
 
 	@SimpleFunction(description =
 			"Retrieves the current FCM registration token from Firebase.\n" +
-					"Tokens can change — always fetch fresh before registering with your server.\n" +
+					"Always fetch fresh before sending to your server.\n" +
 					".\n===============================================================\n.\n" +
 					"Callback parameters:\n" +
-					"  1) token        (text: the FCM token, empty if failed)\n" +
+					"  1) token        (text: FCM token, empty if failed)\n" +
 					"  2) errorMessage (text: empty if success)")
 	public void GetToken(final YailProcedure callback) {
 		if (!validateCallback("GetToken", callback, 2)) return;
@@ -239,15 +254,12 @@ public class FCM extends AndroidNonvisibleComponent
 				.addOnCompleteListener(task -> {
 					if (!task.isSuccessful()) {
 						String err = task.getException() != null
-								? task.getException().getMessage()
-								: "Unknown error";
-						Log.e(TAG, "GetToken failed: " + err);
+								? task.getException().getMessage() : "Unknown error";
 						fireCallback(callback, "", err);
 						return;
 					}
 					String token = task.getResult();
 					prefs.edit().putString(PREF_TOKEN, token).apply();
-					Log.d(TAG, "Token: " + token);
 					fireCallback(callback, token, "");
 				});
 	}
@@ -276,15 +288,13 @@ public class FCM extends AndroidNonvisibleComponent
 					"Callback parameters:\n" +
 					"  1) status       (boolean: true = success, false = failure)\n" +
 					"  2) topic        (text: the topic name)\n" +
-					"  3) errorMessage (text: empty if success, 'Already subscribed' if duplicate)")
+					"  3) errorMessage (text: empty if success)")
 	public void SubscribeToTopic(final String topic, final YailProcedure callback) {
 		if (!validateCallback("SubscribeToTopic", callback, 3)) return;
 		if (!checkInitialized("SubscribeToTopic", callback, 3)) return;
 		if (!validateTopicName(topic, callback)) return;
 
-		// Check local cache — avoid redundant Firebase call
 		if (isTopicSubscribed(topic)) {
-			Log.d(TAG, "Already subscribed: " + topic);
 			fireCallback(callback, Boolean.FALSE, topic, "Already subscribed to: " + topic);
 			return;
 		}
@@ -293,12 +303,10 @@ public class FCM extends AndroidNonvisibleComponent
 				.addOnCompleteListener(task -> mainHandler.post(() -> {
 					if (task.isSuccessful()) {
 						addTopicToCache(topic);
-						Log.d(TAG, "Subscribed: " + topic);
 						fireCallback(callback, Boolean.TRUE, topic, "");
 					} else {
 						String err = task.getException() != null
 								? task.getException().getMessage() : "Unknown error";
-						Log.e(TAG, "Subscribe failed: " + err);
 						fireCallback(callback, Boolean.FALSE, topic, err);
 					}
 				}));
@@ -310,7 +318,6 @@ public class FCM extends AndroidNonvisibleComponent
 
 	@SimpleFunction(description =
 			"Unsubscribes this device from an FCM topic.\n" +
-					"The device will no longer receive messages sent to this topic.\n" +
 					".\n===============================================================\n.\n" +
 					"Callback parameters:\n" +
 					"  1) status       (boolean: true = success, false = failure)\n" +
@@ -324,12 +331,10 @@ public class FCM extends AndroidNonvisibleComponent
 				.addOnCompleteListener(task -> mainHandler.post(() -> {
 					if (task.isSuccessful()) {
 						removeTopicFromCache(topic);
-						Log.d(TAG, "Unsubscribed: " + topic);
 						fireCallback(callback, Boolean.TRUE, topic, "");
 					} else {
 						String err = task.getException() != null
 								? task.getException().getMessage() : "Unknown error";
-						Log.e(TAG, "Unsubscribe failed: " + err);
 						fireCallback(callback, Boolean.FALSE, topic, err);
 					}
 				}));
@@ -341,8 +346,8 @@ public class FCM extends AndroidNonvisibleComponent
 
 	@SimpleFunction(description =
 			"Returns the list of topics this device is currently subscribed to.\n" +
-					"Reads from local cache — does not make a network request.\n" +
-					"Returns an empty list if not subscribed to any topics.")
+					"Reads from local cache — no network request.\n" +
+					"Returns empty list if not subscribed to any topics.")
 	public YailList SubscribedTopics() {
 		Set<String> topics = prefs.getStringSet(PREF_TOPICS, new HashSet<>());
 		return YailList.makeList(new ArrayList<>(topics));
@@ -354,7 +359,7 @@ public class FCM extends AndroidNonvisibleComponent
 
 	@SimpleFunction(description =
 			"Deletes the current FCM registration token.\n" +
-					"Use this on user logout to stop receiving targeted notifications.\n" +
+					"Use on user logout to stop receiving targeted notifications.\n" +
 					"A new token is generated on the next GetToken() call.\n" +
 					".\n===============================================================\n.\n" +
 					"Callback parameters:\n" +
@@ -368,12 +373,10 @@ public class FCM extends AndroidNonvisibleComponent
 				.addOnCompleteListener(task -> mainHandler.post(() -> {
 					if (task.isSuccessful()) {
 						prefs.edit().remove(PREF_TOKEN).apply();
-						Log.d(TAG, "Token deleted");
 						fireCallback(callback, Boolean.TRUE, "");
 					} else {
 						String err = task.getException() != null
 								? task.getException().getMessage() : "Unknown error";
-						Log.e(TAG, "DeleteToken failed: " + err);
 						fireCallback(callback, Boolean.FALSE, err);
 					}
 				}));
@@ -429,8 +432,7 @@ public class FCM extends AndroidNonvisibleComponent
 	// ================================================================
 
 	@SimpleEvent(description =
-			"Fired when the FCM token is refreshed automatically by Firebase.\n" +
-					"Happens after reinstall, data clear, or token rotation.\n" +
+			"Fired when the FCM token is automatically refreshed by Firebase.\n" +
 					"Send the new token to your server immediately.\n" +
 					"  • token — the new FCM registration token")
 	public void TokenReceived(String token) {
@@ -438,9 +440,8 @@ public class FCM extends AndroidNonvisibleComponent
 	}
 
 	@SimpleEvent(description =
-			"Fired when a notification-type FCM message is received.\n" +
-					"In foreground: always fires (notification display depends on SetShowForegroundNotifications).\n" +
-					"In background/killed: fires only for data-only messages.\n" +
+			"Fired when a notification-type FCM message arrives.\n" +
+					"Always fires in foreground.\n" +
 					"  • from       — sender ID\n" +
 					"  • messageId  — unique message identifier\n" +
 					"  • title      — notification title\n" +
@@ -454,9 +455,8 @@ public class FCM extends AndroidNonvisibleComponent
 	}
 
 	@SimpleEvent(description =
-			"Fired when a data-only FCM message is received.\n" +
-					"Data messages are always delivered to onMessageReceived() regardless of app state.\n" +
-					"No notification is shown automatically — your app handles display.\n" +
+			"Fired when a data-only FCM message arrives.\n" +
+					"Delivered regardless of app state. No notification is shown.\n" +
 					"  • from       — sender ID\n" +
 					"  • messageId  — unique message identifier\n" +
 					"  • dataKeys   — list of data payload keys\n" +
@@ -491,7 +491,7 @@ public class FCM extends AndroidNonvisibleComponent
 	}
 
 	// ================================================================
-	// STATIC DISPATCH — called from MyFCMService
+	// STATIC DISPATCH — called from FCMService
 	// ================================================================
 
 	/**
@@ -572,21 +572,6 @@ public class FCM extends AndroidNonvisibleComponent
 	@Override
 	public void onResume() {
 		activeInstance = new WeakReference<>(this);
-
-		Intent intent = activity.getIntent();
-
-		if (intent != null && intent.getExtras() != null) {
-
-			if (intent.hasExtra(FCM.KEY_MESSAGE_ID)
-					|| intent.hasExtra("google.message_id")) {
-
-				handleAppOpenedFromNotification(intent);
-
-				// IMPORTANT:
-				// clear ONLY after handling
-				activity.setIntent(new Intent());
-			}
-		}
 	}
 
 	@Override
@@ -596,51 +581,59 @@ public class FCM extends AndroidNonvisibleComponent
 		}
 	}
 
-	// ================================================================
-	// NOTIFICATION TAP HANDLER
-	// ================================================================
-
-	private void handleAppOpenedFromNotification(Intent intent) {
+	@Override
+	public void onNewIntent(Intent intent) {
+		// Called when app is in background/foreground and user taps notification.
+		// Android delivers the new Intent here instead of creating a new Activity.
 		if (intent == null || intent.getExtras() == null) return;
 
+		boolean hasFcmData = intent.hasExtra(KEY_MESSAGE_ID)
+				|| intent.hasExtra("google.message_id");
+
+		if (!hasFcmData) return;
+
+		// Update the Activity's intent so getIntent() is also consistent
+		activity.setIntent(intent);
+
+		dispatchFromIntent(intent);
+
+		// Clear after dispatch
+		activity.setIntent(new Intent());
+	}
+
+	// ================================================================
+	// INTENT READER — shared by GetLaunchNotification() and onNewIntent()
+	// ================================================================
+
+	/**
+	 * Reads FCM data from an Intent and dispatches AppOpenedFromNotification.
+	 * Used by both GetLaunchNotification() (cold start) and
+	 * onResume() (background → foreground).
+	 */
+	private void dispatchFromIntent(Intent intent) {
 		String messageId = intent.getStringExtra("google.message_id");
-		if (messageId == null) messageId = intent.getStringExtra(FCM.KEY_MESSAGE_ID);
+		if (messageId == null) messageId = intent.getStringExtra(KEY_MESSAGE_ID);
 		if (messageId == null) messageId = "unknown";
 
-		String targetScreen = intent.getStringExtra(KEY_SCREEN);
-		if (targetScreen == null) targetScreen = "";
-
-		List<String> keys = new ArrayList<>();
+		List<String> keys   = new ArrayList<>();
 		List<String> values = new ArrayList<>();
 
 		for (String key : intent.getExtras().keySet()) {
 			if (!SYSTEM_KEYS.contains(key)) {
 				keys.add(key);
-
 				Object val = intent.getExtras().get(key);
 				values.add(val != null ? val.toString() : "");
 			}
 		}
 
-		YailList keyList = YailList.makeList(keys);
-		YailList valueList = YailList.makeList(values);
+		final String   finalId     = messageId;
+		final YailList keyList     = YailList.makeList(keys);
+		final YailList valueList   = YailList.makeList(values);
 
-		Log.d(TAG, "Notification opened: " + messageId);
+		Log.d(TAG, "AppOpenedFromNotification: " + finalId );
 
-		// 🔥 IMPORTANT: FIRE EVENT IMMEDIATELY
-		FCM ext = getActiveInstance();
-		if (ext != null) {
-			String finalMessageId = messageId;
-			String finalTargetScreen = targetScreen;
-			ext.mainHandler.post(() ->
-					ext.AppOpenedFromNotification(
-							finalMessageId,
-							finalTargetScreen,
-							keyList,
-							valueList
-					)
-			);
-		}
+		mainHandler.post(() ->
+				AppOpenedFromNotification(finalId, keyList, valueList));
 	}
 
 	// ================================================================
