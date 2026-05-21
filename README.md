@@ -39,7 +39,7 @@ Send the new token to your server immediately.
 ---
 
 ### 2. NotificationReceived
-<img width="469" height="85" alt="NotificationReceived" src="https://github.com/user-attachments/assets/358f8706-3d6f-4f84-be54-8163ca52d4dd" />
+<img width="336" height="85" alt="NotificationReceived" src="https://github.com/user-attachments/assets/d9ef3447-203e-410d-a378-1fd73848ccc1" />
 
 Fired when a notification-type FCM message arrives.
 Always fires in foreground.
@@ -50,13 +50,14 @@ Always fires in foreground.
 | messageId  | text | unique message identifier                              |
 | title      | text | notification title                                     |
 | body       | text | notification body text                                 |
-| dataKeys   | list | list of extra data payload keys                        |
-| dataValues | list | list of extra data payload values (same order as keys) |
+| data   | dictonary | extra data payload in dictonary                        |
 
 ---
 
 ### 3. MessageReceived
-<img width="363" height="85" alt="MessageReceived" src="https://github.com/user-attachments/assets/05c2153b-181b-4c4e-b9e5-d19e1d685fe8" />
+<img width="259" height="85" alt="MessageReceived" src="https://github.com/user-attachments/assets/f2ec8d8a-a0f4-4864-bfbb-24853634ce54" />
+
+
 
 Fired when a data-only FCM message arrives.
 Delivered regardless of app state. No notification is shown.  
@@ -65,13 +66,13 @@ Delivered regardless of app state. No notification is shown.
 |------------|------|--------------------------------------------------|
 | from       | text | sender ID                                        |
 | messageId  | text | unique message identifier                        |
-| dataKeys   | list | list of data payload keys                        |
-| dataValues | list | list of data payload values (same order as keys) |
+| data   | dictonary | extra data payload in dictonary                        |
 
 ---
 
 ### 4. AppOpenedFromNotification
-<img width="324" height="85" alt="AppOpenedFromNotification" src="https://github.com/user-attachments/assets/6e43f211-b386-4dd4-a155-a655f4e31c74" />
+<img width="324" height="85" alt="AppOpenedFromNotification" src="https://github.com/user-attachments/assets/bc1135f4-d6e1-49b1-b5d1-369d0bac6939" />
+
 
 Fired when the user taps a notification and the app opens.
 
@@ -83,8 +84,7 @@ Two scenarios:
 | Parameter  | Type | Description                      |
 |------------|------|----------------------------------|
 | messageId  | text | ID of the tapped notification    |
-| dataKeys   | list | data payload keys                |
-| dataValues | list | data payload values (same order) |
+| data   | dictonary | extra data payload in dictonary                        |
 
 ---
 
