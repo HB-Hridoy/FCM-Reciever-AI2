@@ -199,20 +199,24 @@ public class FCM extends AndroidNonvisibleComponent
 	// FOREGROUND NOTIFICATION TOGGLE
 	// ================================================================
 
-	@SimpleFunction(description =
-			"Controls whether notifications are shown when the app is in the foreground.\n" +
-					"Setting resets to default (true) each session — call in Screen.Initialize.\n" +
+	@DesignerProperty(
+			editorType = "boolean",
+			defaultValue = "True"
+	)
+	@SimpleProperty(
+			description =
+					"Controls whether notifications are shown when the app is in foreground.\n" +
+					"Resets to true each session — call in Screen.Initialize to change.\n" +
 					".\n===============================================================\n.\n" +
-					"Parameters:\n" +
-					"  • show — true = show notification in foreground (default)\n" +
-					"           false = suppress notification, only fire NotificationReceived event")
-	public void SetShowForegroundNotifications(boolean show) {
+					" • true = show notification (default)\n" +
+					" • false = suppress, only fire NotificationReceived event"
+	)
+	public void ShowForegroundNotifications(boolean show) {
 		this.showForegroundNotif = show;
 	}
 
-	@SimpleFunction(description =
-			"Returns true if foreground notifications are currently enabled.")
-	public boolean IsShowingForegroundNotifications() {
+	@SimpleProperty(description ="Returns whether foreground notifications are currently enabled.")
+	public boolean ShowForegroundNotifications() {
 		return showForegroundNotif;
 	}
 
