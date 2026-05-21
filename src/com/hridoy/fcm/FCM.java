@@ -658,8 +658,7 @@ public class FCM extends AndroidNonvisibleComponent
 	// ================================================================
 
 	private boolean isTopicSubscribed(String topic) {
-		Set<String> topics = prefs.getStringSet(PREF_TOPICS, new HashSet<>());
-		return topics.contains(topic);
+		return prefs.getStringSet(PREF_TOPICS, new HashSet<>()).contains(topic);
 	}
 
 	private void addTopicToCache(String topic) {
@@ -715,12 +714,11 @@ public class FCM extends AndroidNonvisibleComponent
 	}
 
 	/**
-	 * Validates topic name format. Fires 3-param callback with error if invalid.
+	 * Validates callback is non-null and has the correct parameter count.
 	 */
 	private boolean validateTopicName(String topic, YailProcedure cb) {
 		if (topic == null || topic.isEmpty()) {
-			fireCallback(cb, Boolean.FALSE, topic != null ? topic : "",
-					"Topic name cannot be empty");
+			fireCallback(cb, Boolean.FALSE, "", "Topic name cannot be empty");
 			return false;
 		}
 		if (!topic.matches("[a-zA-Z0-9\\-_.~%]+")) {
