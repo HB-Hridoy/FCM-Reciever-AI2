@@ -131,7 +131,6 @@ public class FCM extends AndroidNonvisibleComponent
 			final String applicationId,
 			final String projectId,
 			final String senderId,
-			final String storageBucket,
 			final YailProcedure callback) {
 
 		if (!validateCallback("Initialize", callback, 2)) return;
@@ -147,7 +146,6 @@ public class FCM extends AndroidNonvisibleComponent
 					.setApplicationId(applicationId)
 					.setProjectId(projectId)
 					.setGcmSenderId(senderId)
-					.setStorageBucket(storageBucket)
 					.build();
 
 			if (FirebaseApp.getApps(activity).isEmpty()) {
