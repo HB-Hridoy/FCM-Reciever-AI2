@@ -29,8 +29,8 @@ import java.util.List;
 import java.util.Set;
 
 @DesignerComponent(
-		version = 22,
-		versionName = "2.2.0",
+		version = 25,
+		versionName = "1.0.0",
 		description = "Firebase Cloud Messaging receiver extension. Developed by Hridoy.",
 		iconName = "icon.png"
 )
