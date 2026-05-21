@@ -1,12 +1,13 @@
 package com.hridoy.fcm;
 
-import com.google.appinventor.components.annotations.DesignerComponent;
-import com.google.appinventor.components.runtime.AndroidNonvisibleComponent;
-import com.google.appinventor.components.runtime.ComponentContainer;
-import com.google.appinventor.components.annotations.SimpleFunction;
-import com.google.appinventor.components.annotations.SimpleEvent;
+import com.google.appinventor.components.annotations.*;
+import com.google.appinventor.components.runtime.*;
+import com.google.appinventor.components.runtime.util.YailList;
+import com.google.appinventor.components.runtime.util.YailProcedure;
 
 import android.app.Activity;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -16,44 +17,64 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import com.google.android.gms.tasks.OnCompleteListener;
-import com.google.android.gms.tasks.Task;
-import com.google.appinventor.components.runtime.util.YailProcedure;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
 import com.google.firebase.messaging.FirebaseMessaging;
 
-import com.google.appinventor.components.annotations.*;
-import com.google.appinventor.components.runtime.*;
-import com.google.appinventor.components.runtime.util.YailList;
-
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @DesignerComponent(
-		version = 11,
-		versionName = "1.1.0",
+		version = 25,
+		versionName = "1.0.0",
 		description = "Firebase Cloud Messaging receiver extension. Developed by Hridoy.",
 		iconName = "icon.png"
 )
 public class FCM extends AndroidNonvisibleComponent
-		implements Component, OnDestroyListener, OnResumeListener {
+		implements Component, OnDestroyListener, OnResumeListener, OnNewIntentListener {
 
-	private static final String TAG        = "FCM";
-	private static final String PREFS_NAME = "FCMExtPrefs";
-	private static final String PREF_TOKEN = "fcm_token";
+	private static final String TAG         = "FCM";
+	private static final String PREFS_NAME  = "FCMExtPrefs";
+	private static final String PREF_TOKEN  = "fcm_token";
+	private static final String PREF_TOPICS = "fcm_subscribed_topics";
 
+	static final String KEY_TITLE      = "fcm_title";
+	static final String KEY_BODY       = "fcm_body";
+	static final String KEY_IMAGE      = "fcm_image";
+	static final String KEY_MESSAGE_ID = "fcm_message_id";
+
+	// Internal FCM extras added by the system — filtered from data payloads
+	private static final List<String> SYSTEM_KEYS = Arrays.asList(
+			"google.message_id", "google.sent_time", "google.ttl",
+			"google.original_message_id", "collapse_key", "from",
+			KEY_MESSAGE_ID, "gcm.notification.body", "gcm.notification.title",
+			"gcm.notification.image", "android.support.content.wakelockid",
+			"androidx.content.wakelockid",
+			KEY_TITLE, KEY_BODY, KEY_IMAGE
+	);
+
+	// Notification channel config
+	private String  channelId          = "fcm_default_channel";
+	private String  channelName        = "Push Notifications";
+	private String  channelDescription = "App push notifications";
+	private boolean showForegroundNotif = true;
+
+	// Static bridge — allows MyFCMService to reach the live extension instance
 	static WeakReference<FCM> activeInstance;
 
-	private final Activity        activity;
-	private final Handler         mainHandler;
+	private final Activity          activity;
+	private final Handler           mainHandler;
 	private final SharedPreferences prefs;
 	private boolean initialized = false;
 
-	// ----------------------------------------------------------------
-	// Constructor
-	// ----------------------------------------------------------------
+	// ================================================================
+	// CONSTRUCTOR
+	// ================================================================
+
 	public FCM(ComponentContainer container) {
 		super(container.$form());
 		this.activity    = container.$context() instanceof Activity
@@ -64,6 +85,7 @@ public class FCM extends AndroidNonvisibleComponent
 
 		container.$form().registerForOnDestroy(this);
 		container.$form().registerForOnResume(this);
+		container.$form().registerForOnNewIntent(this);
 		activeInstance = new WeakReference<>(this);
 
 		Log.d(TAG, "FCM constructed");
@@ -76,27 +98,22 @@ public class FCM extends AndroidNonvisibleComponent
 	@SimpleFunction(description =
 			"Initializes Firebase with your project credentials.\n" +
 					"Call this once at app startup before any other FCM method.\n" +
-					".\n" +
-					"===============================================================\n" +
-					".\n" +
+					".\n===============================================================\n.\n" +
 					"Parameters from Firebase Console → Project Settings:\n" +
-					"  • apiKey         — Web API key\n" +
-					"  • applicationId  — App ID (e.g. 1:123:android:abc)\n" +
-					"  • projectId      — Project ID (e.g. my-app-123)\n" +
-					"  • senderId       — Sender ID / Cloud Messaging number\n" +
-					"  • storageBucket  — Storage bucket (e.g. my-app.appspot.com)\n" +
-					".\n" +
-					"===============================================================\n" +
-					".\n" +
-					"Calls the provided callback with 2 parameters:\n" +
-					"  1) status (boolean: true = success, false = failure)\n" +
+					"  • apiKey        — Web API key\n" +
+					"  • applicationId — App ID (e.g. 1:123:android:abc)\n" +
+					"  • projectId     — Project ID (e.g. my-app-123)\n" +
+					"  • senderId      — Sender ID / Cloud Messaging number\n" +
+					"  • storageBucket — Storage bucket (e.g. my-app.appspot.com)\n" +
+					".\n===============================================================\n.\n" +
+					"Callback parameters:\n" +
+					"  1) status       (boolean: true = success, false = failure)\n" +
 					"  2) errorMessage (text: empty if success)")
 	public void Initialize(
 			final String apiKey,
 			final String applicationId,
 			final String projectId,
 			final String senderId,
-			final String storageBucket,
 			final YailProcedure callback) {
 
 		if (!validateCallback("Initialize", callback, 2)) return;
@@ -112,14 +129,10 @@ public class FCM extends AndroidNonvisibleComponent
 					.setApplicationId(applicationId)
 					.setProjectId(projectId)
 					.setGcmSenderId(senderId)
-					.setStorageBucket(storageBucket)
 					.build();
 
 			if (FirebaseApp.getApps(activity).isEmpty()) {
 				FirebaseApp.initializeApp(activity, options);
-				Log.d(TAG, "FirebaseApp initialized");
-			} else {
-				Log.d(TAG, "FirebaseApp already exists, reusing");
 			}
 
 			initialized = true;
@@ -132,41 +145,122 @@ public class FCM extends AndroidNonvisibleComponent
 	}
 
 	// ================================================================
+	// GET LAUNCH NOTIFICATION
+	// ================================================================
+
+	@SimpleFunction(description =
+			"Call this in Screen1.Initialize to check if the app was opened\n" +
+					"by tapping a notification while the app was killed or in background.\n" +
+					".\n===============================================================\n.\n" +
+					"Reads the current launch Intent directly — no static storage,\n" +
+					"works correctly with multiple notifications.\n" +
+					".\n" +
+					"If the app was opened from a notification tap, fires\n" +
+					"AppOpenedFromNotification immediately.\n" +
+					"If the app was opened normally, does nothing.\n" +
+					".\n" +
+					"Recommended call order in Screen1.Initialize:\n" +
+					"  1. call FCM.Initialize(...)\n" +
+					"  2. call FCM.GetLaunchNotification()\n" +
+					"  3. call FCM.GetToken(...)")
+	public void GetLaunchNotification() {
+		Intent intent = activity.getIntent();
+
+		if (intent == null || intent.getExtras() == null) return;
+
+		// Check if this Intent carries FCM notification tap data
+		boolean hasFcmData = intent.hasExtra(KEY_MESSAGE_ID)
+				|| intent.hasExtra("google.message_id");
+
+		if (!hasFcmData) return;
+
+		// Read and dispatch
+		dispatchFromIntent(intent);
+
+		// Clear the Intent so re-entering this screen doesn't re-fire
+		activity.setIntent(new Intent());
+	}
+
+	// ================================================================
+	// NOTIFICATION CHANNEL
+	// ================================================================
+
+	@SimpleFunction(description =
+			"Configures the Android notification channel for all FCM notifications.\n" +
+					"Call before the first notification is displayed.\n" +
+					"No-op on Android 7 and below.\n" +
+					".\n===============================================================\n.\n" +
+					"Parameters:\n" +
+					"  • channelId          — unique ID (e.g. 'my_channel')\n" +
+					"  • channelName        — name shown in system settings\n" +
+					"  • channelDescription — description shown in system settings")
+	public void SetNotificationChannel(
+			String channelId, String channelName, String channelDescription) {
+		this.channelId          = channelId;
+		this.channelName        = channelName;
+		this.channelDescription = channelDescription;
+
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+			NotificationManager mgr =
+					(NotificationManager) activity.getSystemService(Context.NOTIFICATION_SERVICE);
+			NotificationChannel ch = new NotificationChannel(
+					channelId, channelName, NotificationManager.IMPORTANCE_HIGH);
+			ch.setDescription(channelDescription);
+			mgr.createNotificationChannel(ch);
+		}
+	}
+
+	// ================================================================
+	// FOREGROUND NOTIFICATION TOGGLE
+	// ================================================================
+
+	@DesignerProperty(
+			editorType = "boolean",
+			defaultValue = "True"
+	)
+	@SimpleProperty(
+			description =
+					"Controls whether notifications are shown when the app is in foreground.\n" +
+					"Resets to true each session — call in Screen.Initialize to change.\n" +
+					".\n===============================================================\n.\n" +
+					" • true = show notification (default)\n" +
+					" • false = suppress, only fire NotificationReceived event"
+	)
+	public void ShowForegroundNotifications(boolean show) {
+		this.showForegroundNotif = show;
+	}
+
+	@SimpleProperty(description ="Returns whether foreground notifications are currently enabled.")
+	public boolean ShowForegroundNotifications() {
+		return showForegroundNotif;
+	}
+
+	// ================================================================
 	// GET TOKEN
 	// ================================================================
 
 	@SimpleFunction(description =
 			"Retrieves the current FCM registration token from Firebase.\n" +
-					"Tokens can change over time — always fetch a fresh token\n" +
-					"before registering with your server.\n" +
-					".\n" +
-					"===============================================================\n" +
-					".\n" +
-					"Calls the provided callback with 2 parameters:\n" +
-					"  1) token        (text: the FCM token, empty if failed)\n" +
+					"Always fetch fresh before sending to your server.\n" +
+					".\n===============================================================\n.\n" +
+					"Callback parameters:\n" +
+					"  1) token        (text: FCM token, empty if failed)\n" +
 					"  2) errorMessage (text: empty if success)")
 	public void GetToken(final YailProcedure callback) {
-
 		if (!validateCallback("GetToken", callback, 2)) return;
-		if (!checkInitialized("GetToken", callback)) return;
+		if (!checkInitialized("GetToken", callback, 2)) return;
 
 		FirebaseMessaging.getInstance().getToken()
-				.addOnCompleteListener(new OnCompleteListener<String>() {
-					@Override
-					public void onComplete(Task<String> task) {
-						if (!task.isSuccessful()) {
-							String err = task.getException() != null
-									? task.getException().getMessage()
-									: "Unknown error getting token";
-							Log.e(TAG, "GetToken failed: " + err);
-							fireCallback(callback, "", err);
-							return;
-						}
-						final String token = task.getResult();
-						Log.d(TAG, "Token: " + token);
-						prefs.edit().putString(PREF_TOKEN, token).apply();
-						fireCallback(callback, token, "");
+				.addOnCompleteListener(task -> {
+					if (!task.isSuccessful()) {
+						String err = task.getException() != null
+								? task.getException().getMessage() : "Unknown error";
+						fireCallback(callback, "", err);
+						return;
 					}
+					String token = task.getResult();
+					prefs.edit().putString(PREF_TOKEN, token).apply();
+					fireCallback(callback, token, "");
 				});
 	}
 
@@ -176,8 +270,8 @@ public class FCM extends AndroidNonvisibleComponent
 
 	@SimpleFunction(description =
 			"Returns the last known FCM token from local cache.\n" +
-					"Returns an empty string if no token has been fetched yet.\n" +
-					"Use GetToken() to always retrieve a fresh token from Firebase.")
+					"Returns empty string if no token has been fetched yet.\n" +
+					"Use GetToken() to retrieve a fresh token from Firebase.")
 	public String GetCachedToken() {
 		return prefs.getString(PREF_TOKEN, "");
 	}
@@ -188,29 +282,31 @@ public class FCM extends AndroidNonvisibleComponent
 
 	@SimpleFunction(description =
 			"Subscribes this device to an FCM topic.\n" +
+					"Checks local cache first — skips Firebase call if already subscribed.\n" +
 					"Topic names must match [a-zA-Z0-9-_.~%] and be under 900 chars.\n" +
-					".\n" +
-					"===============================================================\n" +
-					".\n" +
-					"Calls the provided callback with 3 parameters:\n" +
+					".\n===============================================================\n.\n" +
+					"Callback parameters:\n" +
 					"  1) status       (boolean: true = success, false = failure)\n" +
 					"  2) topic        (text: the topic name)\n" +
 					"  3) errorMessage (text: empty if success)")
 	public void SubscribeToTopic(final String topic, final YailProcedure callback) {
-
 		if (!validateCallback("SubscribeToTopic", callback, 3)) return;
-		if (!checkInitialized("SubscribeToTopic", callback)) return;
+		if (!checkInitialized("SubscribeToTopic", callback, 3)) return;
 		if (!validateTopicName(topic, callback)) return;
+
+		if (isTopicSubscribed(topic)) {
+			fireCallback(callback, Boolean.FALSE, topic, "Already subscribed to: " + topic);
+			return;
+		}
 
 		FirebaseMessaging.getInstance().subscribeToTopic(topic)
 				.addOnCompleteListener(task -> mainHandler.post(() -> {
 					if (task.isSuccessful()) {
-						Log.d(TAG, "Subscribed: " + topic);
+						addTopicToCache(topic);
 						fireCallback(callback, Boolean.TRUE, topic, "");
 					} else {
 						String err = task.getException() != null
 								? task.getException().getMessage() : "Unknown error";
-						Log.e(TAG, "Subscribe failed: " + err);
 						fireCallback(callback, Boolean.FALSE, topic, err);
 					}
 				}));
@@ -222,31 +318,39 @@ public class FCM extends AndroidNonvisibleComponent
 
 	@SimpleFunction(description =
 			"Unsubscribes this device from an FCM topic.\n" +
-					"The device will no longer receive messages sent to this topic.\n" +
-					".\n" +
-					"===============================================================\n" +
-					".\n" +
-					"Calls the provided callback with 3 parameters:\n" +
+					".\n===============================================================\n.\n" +
+					"Callback parameters:\n" +
 					"  1) status       (boolean: true = success, false = failure)\n" +
 					"  2) topic        (text: the topic name)\n" +
 					"  3) errorMessage (text: empty if success)")
 	public void UnsubscribeFromTopic(final String topic, final YailProcedure callback) {
-
 		if (!validateCallback("UnsubscribeFromTopic", callback, 3)) return;
-		if (!checkInitialized("UnsubscribeFromTopic", callback)) return;
+		if (!checkInitialized("UnsubscribeFromTopic", callback, 3)) return;
 
 		FirebaseMessaging.getInstance().unsubscribeFromTopic(topic)
 				.addOnCompleteListener(task -> mainHandler.post(() -> {
 					if (task.isSuccessful()) {
-						Log.d(TAG, "Unsubscribed: " + topic);
+						removeTopicFromCache(topic);
 						fireCallback(callback, Boolean.TRUE, topic, "");
 					} else {
 						String err = task.getException() != null
 								? task.getException().getMessage() : "Unknown error";
-						Log.e(TAG, "Unsubscribe failed: " + err);
 						fireCallback(callback, Boolean.FALSE, topic, err);
 					}
 				}));
+	}
+
+	// ================================================================
+	// SUBSCRIBED TOPICS
+	// ================================================================
+
+	@SimpleFunction(description =
+			"Returns the list of topics this device is currently subscribed to.\n" +
+					"Reads from local cache — no network request.\n" +
+					"Returns empty list if not subscribed to any topics.")
+	public YailList SubscribedTopics() {
+		Set<String> topics = prefs.getStringSet(PREF_TOPICS, new HashSet<>());
+		return YailList.makeList(new ArrayList<>(topics));
 	}
 
 	// ================================================================
@@ -255,103 +359,67 @@ public class FCM extends AndroidNonvisibleComponent
 
 	@SimpleFunction(description =
 			"Deletes the current FCM registration token.\n" +
-					"Use this when a user logs out to stop receiving notifications.\n" +
-					"A new token will be generated on the next GetToken() call.\n" +
-					".\n" +
-					"===============================================================\n" +
-					".\n" +
-					"Calls the provided callback with 2 parameters:\n" +
+					"Use on user logout to stop receiving targeted notifications.\n" +
+					"A new token is generated on the next GetToken() call.\n" +
+					".\n===============================================================\n.\n" +
+					"Callback parameters:\n" +
 					"  1) status       (boolean: true = success, false = failure)\n" +
 					"  2) errorMessage (text: empty if success)")
 	public void DeleteToken(final YailProcedure callback) {
-
 		if (!validateCallback("DeleteToken", callback, 2)) return;
-		if (!checkInitialized("DeleteToken", callback)) return;
+		if (!checkInitialized("DeleteToken", callback, 2)) return;
 
 		FirebaseMessaging.getInstance().deleteToken()
 				.addOnCompleteListener(task -> mainHandler.post(() -> {
 					if (task.isSuccessful()) {
 						prefs.edit().remove(PREF_TOKEN).apply();
-						Log.d(TAG, "Token deleted");
 						fireCallback(callback, Boolean.TRUE, "");
 					} else {
 						String err = task.getException() != null
 								? task.getException().getMessage() : "Unknown error";
-						Log.e(TAG, "DeleteToken failed: " + err);
 						fireCallback(callback, Boolean.FALSE, err);
 					}
 				}));
 	}
 
 	// ================================================================
-	// REQUEST NOTIFICATION PERMISSION
+	// NOTIFICATION PERMISSION
 	// ================================================================
 
 	@SimpleFunction(description =
-			"Requests the POST_NOTIFICATIONS runtime permission on Android 13+.\n" +
-					"On Android 12 and below this is a no-op — permission is always granted.\n" +
-					"Should be called from a user interaction such as a button click.\n" +
+			"Requests POST_NOTIFICATIONS runtime permission on Android 13+.\n" +
+					"No-op on Android 12 and below.\n" +
+					"Call from a button click — not from Screen.Initialize.\n" +
+					".\n===============================================================\n.\n" +
+					"Callback parameters:\n" +
+					"  1) granted      (boolean: true = already granted, false = dialog shown)\n" +
+					"  2) errorMessage (text: empty if already granted)\n" +
 					".\n" +
-					"===============================================================\n" +
-					".\n" +
-					"Calls the provided callback with 2 parameters:\n" +
-					"  1) granted      (boolean: true = permission granted)\n" +
-					"  2) errorMessage (text: empty if granted)")
-	public void RequestNotificationPermission(final YailProcedure callback) {
+					"Call IsNotificationPermissionGranted() after user responds to get the result.")
+	public void RequestNotificationPermission() {
 
-		if (!validateCallback("RequestNotificationPermission", callback, 2)) return;
-
-		// Below Android 13 — permission not required, always granted
 		if (Build.VERSION.SDK_INT < 33) {
-			fireCallback(callback, Boolean.TRUE, "");
 			return;
 		}
 
-		// Already granted — no need to prompt
 		try {
-			boolean alreadyGranted = activity.checkSelfPermission(
-					"android.permission.POST_NOTIFICATIONS"
-			) == PackageManager.PERMISSION_GRANTED;
-
-			if (alreadyGranted) {
-				fireCallback(callback, Boolean.TRUE, "");
+			if (activity.checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED) {
 				return;
 			}
-		} catch (Exception e) {
-			// Defensive — should never throw
-		}
+		} catch (Exception ignored) {}
 
-		// Request the permission
-		// Result comes back via onRequestPermissionsResult in the Activity.
-		// App Inventor does not expose that callback to extensions directly,
-		// so we fire the callback immediately after requesting.
-		// The user should call IsNotificationPermissionGranted() after the
-		// system dialog is dismissed to confirm the actual result.
-		activity.requestPermissions(
-				new String[]{"android.permission.POST_NOTIFICATIONS"},
-				1001
-		);
+		activity.requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1001);
 
-		// Inform the blocks that the request was dispatched
-		fireCallback(callback, Boolean.FALSE,
-				"Permission dialog shown — call IsNotificationPermissionGranted() " +
-						"after user responds to check the result.");
 	}
 
-	// ================================================================
-	// IS NOTIFICATION PERMISSION GRANTED
-	// ================================================================
-
 	@SimpleFunction(description =
-			"Returns true if the POST_NOTIFICATIONS permission is granted.\n" +
-					"Always returns true on Android 12 and below.\n" +
-					"Call this after RequestNotificationPermission() to check the result.")
+			"Returns true if POST_NOTIFICATIONS permission is granted.\n" +
+					"Always returns true on Android 12 and below.")
 	public boolean IsNotificationPermissionGranted() {
 		if (Build.VERSION.SDK_INT >= 33) {
 			try {
-				return activity.checkSelfPermission(
-						"android.permission.POST_NOTIFICATIONS"
-				) == PackageManager.PERMISSION_GRANTED;
+				return activity.checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+						== PackageManager.PERMISSION_GRANTED;
 			} catch (Exception e) {
 				return false;
 			}
@@ -360,24 +428,37 @@ public class FCM extends AndroidNonvisibleComponent
 	}
 
 	// ================================================================
-	// EVENTS — Message delivery (service → extension bridge)
-	// These remain as events because they are pushed asynchronously
-	// by MyFCMService and are not tied to a specific user action.
+	// EVENTS
 	// ================================================================
 
 	@SimpleEvent(description =
-			"Fired when the FCM token is refreshed by Firebase automatically.\n" +
-					"This can happen after app reinstall, data clear, or token rotation.\n" +
-					"Send the new token to your server immediately.")
+			"Fired when the FCM token is automatically refreshed by Firebase.\n" +
+					"Send the new token to your server immediately.\n" +
+					"  • token — the new FCM registration token")
 	public void TokenReceived(String token) {
 		EventDispatcher.dispatchEvent(this, "TokenReceived", token);
 	}
 
 	@SimpleEvent(description =
-			"Fired when a data message arrives while the app is in the foreground,\n" +
-					"or when a background data-only message is delivered.\n" +
+			"Fired when a notification-type FCM message arrives.\n" +
+					"Always fires in foreground.\n" +
 					"  • from       — sender ID\n" +
-					"  • messageId  — unique message ID\n" +
+					"  • messageId  — unique message identifier\n" +
+					"  • title      — notification title\n" +
+					"  • body       — notification body text\n" +
+					"  • dataKeys   — list of extra data payload keys\n" +
+					"  • dataValues — list of extra data payload values (same order as keys)")
+	public void NotificationReceived(String from, String messageId,
+									 String title, String body, YailList dataKeys, YailList dataValues) {
+		EventDispatcher.dispatchEvent(this, "NotificationReceived",
+				from, messageId, title, body, dataKeys, dataValues);
+	}
+
+	@SimpleEvent(description =
+			"Fired when a data-only FCM message arrives.\n" +
+					"Delivered regardless of app state. No notification is shown.\n" +
+					"  • from       — sender ID\n" +
+					"  • messageId  — unique message identifier\n" +
 					"  • dataKeys   — list of data payload keys\n" +
 					"  • dataValues — list of data payload values (same order as keys)")
 	public void MessageReceived(String from, String messageId,
@@ -387,18 +468,22 @@ public class FCM extends AndroidNonvisibleComponent
 	}
 
 	@SimpleEvent(description =
-			"Fired when the user taps a notification generated by this extension.\n" +
-					"  • messageId  — ID of the tapped message\n" +
-					"  • dataKeys   — list of data payload keys\n" +
-					"  • dataValues — list of data payload values")
-	public void NotificationClicked(String messageId,
-									YailList dataKeys, YailList dataValues) {
-		EventDispatcher.dispatchEvent(this, "NotificationClicked",
+			"Fired when the user taps a notification and the app opens.\n" +
+					".\n" +
+					"Two scenarios:\n" +
+					"  • App killed — call GetLaunchNotification() in Screen1.Initialize\n" +
+					"  • App in background — fires automatically via onResume\n" +
+					".\n" +
+					"  • messageId    — ID of the tapped notification\n" +
+					"  • dataKeys     — data payload keys\n" +
+					"  • dataValues   — data payload values (same order)")
+	public void AppOpenedFromNotification(String messageId, YailList dataKeys, YailList dataValues) {
+		EventDispatcher.dispatchEvent(this, "AppOpenedFromNotification",
 				messageId, dataKeys, dataValues);
 	}
 
 	@SimpleEvent(description =
-			"Fired when any internal FCM operation fails outside of a callback context.\n" +
+			"Fired when any FCM operation fails outside of a callback context.\n" +
 					"  • operation — name of the method that failed\n" +
 					"  • message   — error description")
 	public void ErrorOccurred(String operation, String message) {
@@ -406,31 +491,88 @@ public class FCM extends AndroidNonvisibleComponent
 	}
 
 	// ================================================================
-	// STATIC DISPATCH — called from MyFCMService
+	// STATIC DISPATCH — called from FCMService
 	// ================================================================
 
+	/**
+	 * Called by MyFCMService.onNewToken()
+	 */
 	static void dispatchTokenRefreshed(final String token) {
-		if (activeInstance == null) return;
-		final FCM ext = activeInstance.get();
+		FCM ext = getActiveInstance();
 		if (ext == null) return;
 		ext.prefs.edit().putString(PREF_TOKEN, token).apply();
 		ext.mainHandler.post(() -> ext.TokenReceived(token));
 	}
 
+	/**
+	 * Called by MyFCMService.onMessageReceived() for data-only messages.
+	 */
 	static void dispatchMessageReceived(
 			final String from,
 			final String messageId,
 			final YailList keys,
 			final YailList values) {
-		if (activeInstance == null) return;
-		final FCM ext = activeInstance.get();
+		FCM ext = getActiveInstance();
 		if (ext == null) return;
 		ext.mainHandler.post(() -> ext.MessageReceived(from, messageId, keys, values));
+	}
+
+	/**
+	 * Called by MyFCMService.onMessageReceived() for notification-type messages.
+	 */
+	static void dispatchNotificationReceived(
+			final String from,
+			final String messageId,
+			final String title,
+			final String body,
+			final YailList keys,
+			final YailList values) {
+		FCM ext = getActiveInstance();
+		if (ext == null) return;
+		ext.mainHandler.post(() ->
+				ext.NotificationReceived(from, messageId, title, body, keys, values));
+	}
+
+	/**
+	 * Returns whether foreground notifications should be shown.
+	 * Called by MyFCMService to check before building a notification.
+	 */
+	static boolean shouldShowForegroundNotification() {
+		FCM ext = getActiveInstance();
+		return ext == null || ext.showForegroundNotif;
+	}
+
+	/**
+	 * Returns the current channel ID for notification building in MyFCMService.
+	 */
+	static String getChannelId() {
+		FCM ext = getActiveInstance();
+		return ext != null ? ext.channelId : "fcm_default_channel";
+	}
+
+	static String getChannelName() {
+		FCM ext = getActiveInstance();
+		return ext != null ? ext.channelName : "Push Notifications";
+	}
+
+	static String getChannelDescription() {
+		FCM ext = getActiveInstance();
+		return ext != null ? ext.channelDescription : "";
+	}
+
+	private static FCM getActiveInstance() {
+		if (activeInstance == null) return null;
+		return activeInstance.get();
 	}
 
 	// ================================================================
 	// LIFECYCLE
 	// ================================================================
+
+	@Override
+	public void onResume() {
+		activeInstance = new WeakReference<>(this);
+	}
 
 	@Override
 	public void onDestroy() {
@@ -440,13 +582,80 @@ public class FCM extends AndroidNonvisibleComponent
 	}
 
 	@Override
-	public void onResume() {
-		activeInstance = new WeakReference<>(this);
-		Intent launchIntent = activity.getIntent();
-		if (launchIntent != null && launchIntent.hasExtra("fcm_message_id")) {
-			handleNotificationClick(launchIntent);
-			activity.setIntent(new Intent());
+	public void onNewIntent(Intent intent) {
+		// Called when app is in background/foreground and user taps notification.
+		// Android delivers the new Intent here instead of creating a new Activity.
+		if (intent == null || intent.getExtras() == null) return;
+
+		boolean hasFcmData = intent.hasExtra(KEY_MESSAGE_ID)
+				|| intent.hasExtra("google.message_id");
+
+		if (!hasFcmData) return;
+
+		// Update the Activity's intent so getIntent() is also consistent
+		activity.setIntent(intent);
+
+		dispatchFromIntent(intent);
+
+		// Clear after dispatch
+		activity.setIntent(new Intent());
+	}
+
+	// ================================================================
+	// INTENT READER — shared by GetLaunchNotification() and onNewIntent()
+	// ================================================================
+
+	/**
+	 * Reads FCM data from an Intent and dispatches AppOpenedFromNotification.
+	 * Used by both GetLaunchNotification() (cold start) and
+	 * onResume() (background → foreground).
+	 */
+	private void dispatchFromIntent(Intent intent) {
+		String messageId = intent.getStringExtra("google.message_id");
+		if (messageId == null) messageId = intent.getStringExtra(KEY_MESSAGE_ID);
+		if (messageId == null) messageId = "unknown";
+
+		List<String> keys   = new ArrayList<>();
+		List<String> values = new ArrayList<>();
+
+		for (String key : intent.getExtras().keySet()) {
+			if (!SYSTEM_KEYS.contains(key)) {
+				keys.add(key);
+				Object val = intent.getExtras().get(key);
+				values.add(val != null ? val.toString() : "");
+			}
 		}
+
+		final String   finalId     = messageId;
+		final YailList keyList     = YailList.makeList(keys);
+		final YailList valueList   = YailList.makeList(values);
+
+		Log.d(TAG, "AppOpenedFromNotification: " + finalId );
+
+		mainHandler.post(() ->
+				AppOpenedFromNotification(finalId, keyList, valueList));
+	}
+
+	// ================================================================
+	// TOPIC CACHE HELPERS
+	// ================================================================
+
+	private boolean isTopicSubscribed(String topic) {
+		return prefs.getStringSet(PREF_TOPICS, new HashSet<>()).contains(topic);
+	}
+
+	private void addTopicToCache(String topic) {
+		Set<String> topics = new HashSet<>(
+				prefs.getStringSet(PREF_TOPICS, new HashSet<>()));
+		topics.add(topic);
+		prefs.edit().putStringSet(PREF_TOPICS, topics).apply();
+	}
+
+	private void removeTopicFromCache(String topic) {
+		Set<String> topics = new HashSet<>(
+				prefs.getStringSet(PREF_TOPICS, new HashSet<>()));
+		topics.remove(topic);
+		prefs.edit().putStringSet(PREF_TOPICS, topics).apply();
 	}
 
 	// ================================================================
@@ -454,60 +663,54 @@ public class FCM extends AndroidNonvisibleComponent
 	// ================================================================
 
 	/**
-	 * Validates that callback is non-null and has exactly the expected
-	 * number of parameters. Fires ErrorOccurred if invalid.
-	 * Returns true if valid.
+	 * Validates callback is non-null and has the correct parameter count.
 	 */
-	private boolean validateCallback(String operation, YailProcedure callback, int expectedArgs) {
-		if (callback == null) {
-			dispatchErrorEvent(operation, "Callback is null");
+	private boolean validateCallback(String op, YailProcedure cb, int expected) {
+		if (cb == null) {
+			dispatchErrorEvent(op, "Callback is null");
 			return false;
 		}
-		if (callback.numArgs() != expectedArgs) {
-			dispatchErrorEvent(operation,
-					"Callback must have exactly " + expectedArgs + " parameter(s). " +
-							"Got " + callback.numArgs() + ".");
+		if (cb.numArgs() != expected) {
+			dispatchErrorEvent(op, "Callback must have exactly " + expected
+					+ " parameter(s). Got " + cb.numArgs() + ".");
 			return false;
 		}
 		return true;
 	}
 
 	/**
-	 * Checks Firebase is initialized. Fires callback with error if not.
-	 * Returns true if initialized.
+	 * Checks Firebase is initialized.
+	 * Fires first callback param as false + last param as error message.
+	 * Shape depends on expected arg count.
 	 */
-	private boolean checkInitialized(String operation, YailProcedure callback) {
+	private boolean checkInitialized(String op, YailProcedure cb, int argCount) {
 		if (!initialized) {
-			// Fire through callback so blocks can handle it inline
-			// Use varargs fireCallback — 2-param error shape
-			mainHandler.post(() -> {
-				try {
-					// Build args: first param false/empty, last param = error message
-					// We don't know the shape here so fire ErrorOccurred event instead
-					ErrorOccurred(operation,
-							"Firebase not initialized. Call Initialize() first.");
-				} catch (Exception ignored) {}
-			});
+			String err = "Firebase not initialized. Call Initialize() first.";
+			switch (argCount) {
+				case 2: fireCallback(cb, Boolean.FALSE, err); break;
+				case 3: fireCallback(cb, Boolean.FALSE, "", err); break;
+				default: dispatchErrorEvent(op, err); break;
+			}
 			return false;
 		}
 		return true;
 	}
 
 	/**
-	 * Validates topic name format. Fires callback with error if invalid.
+	 * Validates callback is non-null and has the correct parameter count.
 	 */
-	private boolean validateTopicName(String topic, YailProcedure callback) {
+	private boolean validateTopicName(String topic, YailProcedure cb) {
 		if (topic == null || topic.isEmpty()) {
-			fireCallback(callback, Boolean.FALSE, topic, "Topic name cannot be empty");
+			fireCallback(cb, Boolean.FALSE, "", "Topic name cannot be empty");
 			return false;
 		}
 		if (!topic.matches("[a-zA-Z0-9\\-_.~%]+")) {
-			fireCallback(callback, Boolean.FALSE, topic,
+			fireCallback(cb, Boolean.FALSE, topic,
 					"Invalid topic name. Must match [a-zA-Z0-9-_.~%]");
 			return false;
 		}
 		if (topic.length() > 900) {
-			fireCallback(callback, Boolean.FALSE, topic,
+			fireCallback(cb, Boolean.FALSE, topic,
 					"Topic name too long (max 900 chars)");
 			return false;
 		}
@@ -515,14 +718,13 @@ public class FCM extends AndroidNonvisibleComponent
 	}
 
 	/**
-	 * Fires a YailProcedure callback on the main thread with variable args.
-	 * Matches App Inventor's anonymous block calling convention.
+	 * Posts a YailProcedure callback on the main thread with variable args.
 	 */
-	private void fireCallback(final YailProcedure callback, final Object... args) {
-		if (callback == null) return;
+	private void fireCallback(final YailProcedure cb, final Object... args) {
+		if (cb == null) return;
 		mainHandler.post(() -> {
 			try {
-				callback.call(args);
+				cb.call(args);
 			} catch (Exception e) {
 				Log.e(TAG, "Callback dispatch failed: " + e.getMessage());
 				dispatchErrorEvent("Callback", e.getMessage());
@@ -530,35 +732,7 @@ public class FCM extends AndroidNonvisibleComponent
 		});
 	}
 
-	/**
-	 * Fires ErrorOccurred event — used when no callback context is available.
-	 */
-	private void dispatchErrorEvent(final String operation, final String message) {
-		mainHandler.post(() -> ErrorOccurred(operation, message));
-	}
-
-	/**
-	 * Handles notification tap after process death — reads FCM data from Intent.
-	 */
-	private void handleNotificationClick(Intent intent) {
-		String messageId = intent.getStringExtra("fcm_message_id");
-		if (messageId == null) return;
-
-		List<String> keys   = new ArrayList<>();
-		List<String> values = new ArrayList<>();
-
-		for (String key : intent.getExtras().keySet()) {
-			if (!key.equals("fcm_message_id")) {
-				keys.add(key);
-				Object val = intent.getExtras().get(key);
-				values.add(val != null ? val.toString() : "");
-			}
-		}
-
-		final YailList keyList   = YailList.makeList(keys);
-		final YailList valueList = YailList.makeList(values);
-		final String   finalId   = messageId;
-
-		mainHandler.post(() -> NotificationClicked(finalId, keyList, valueList));
+	private void dispatchErrorEvent(final String op, final String msg) {
+		mainHandler.post(() -> ErrorOccurred(op, msg));
 	}
 }

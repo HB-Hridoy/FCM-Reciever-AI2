@@ -2,7 +2,7 @@
 .github
 .fast
 .vscode
-fcm/out/.DS_Store
+out
 .classpath
 .DS_Store
 .project
