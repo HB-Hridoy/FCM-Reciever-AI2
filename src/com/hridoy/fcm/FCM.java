@@ -62,7 +62,6 @@ public class FCM extends AndroidNonvisibleComponent
 	static final String KEY_BODY       = "fcm_body";
 	static final String KEY_IMAGE      = "fcm_image";
 	static final String KEY_MESSAGE_ID = "fcm_message_id";
-	static final String KEY_SCREEN     = "fcm_target_screen";
 
 	// Internal FCM extras added by the system — filtered from data payloads
 	private static final List<String> SYSTEM_KEYS = Arrays.asList(
@@ -70,8 +69,8 @@ public class FCM extends AndroidNonvisibleComponent
 			"google.original_message_id", "collapse_key", "from",
 			"fcm_message_id", "gcm.notification.body", "gcm.notification.title",
 			"gcm.notification.image", "android.support.content.wakelockid",
-			"androidx.content.wakelockid", KEY_TITLE, KEY_BODY,
-			KEY_IMAGE, KEY_SCREEN
+			"androidx.content.wakelockid",
+			KEY_TITLE, KEY_BODY, KEY_IMAGE
 	);
 
 	// Notification channel config
@@ -480,15 +479,17 @@ public class FCM extends AndroidNonvisibleComponent
 
 	@SimpleEvent(description =
 			"Fired when the user taps a notification and the app opens.\n" +
-					"Works for both fresh launches and resume from background.\n" +
-					"  • messageId      — ID of the notification that was tapped\n" +
-					"  • targetScreen   — screen to open (empty if not specified by sender)\n" +
-					"  • dataKeys       — list of data payload keys\n" +
-					"  • dataValues     — list of data payload values (same order as keys)")
-	public void AppOpenedFromNotification(String messageId, String targetScreen,
-										  YailList dataKeys, YailList dataValues) {
+					".\n" +
+					"Two scenarios:\n" +
+					"  • App killed — call GetLaunchNotification() in Screen1.Initialize\n" +
+					"  • App in background — fires automatically via onResume\n" +
+					".\n" +
+					"  • messageId    — ID of the tapped notification\n" +
+					"  • dataKeys     — data payload keys\n" +
+					"  • dataValues   — data payload values (same order)")
+	public void AppOpenedFromNotification(String messageId, YailList dataKeys, YailList dataValues) {
 		EventDispatcher.dispatchEvent(this, "AppOpenedFromNotification",
-				messageId, targetScreen, dataKeys, dataValues);
+				messageId, dataKeys, dataValues);
 	}
 
 	@SimpleEvent(description =

@@ -37,7 +37,7 @@ public class FCMService extends FirebaseMessagingService {
             "google.message_id", "google.sent_time", "google.ttl",
             "google.original_message_id", "collapse_key", "from",
             FCM.KEY_TITLE, FCM.KEY_BODY, FCM.KEY_IMAGE,
-            FCM.KEY_MESSAGE_ID, FCM.KEY_SCREEN
+            FCM.KEY_MESSAGE_ID
     );
 
     // ================================================================
@@ -98,7 +98,6 @@ public class FCMService extends FirebaseMessagingService {
             String title   = data.containsKey(FCM.KEY_TITLE) ? data.get(FCM.KEY_TITLE) : "";
             String body    = data.containsKey(FCM.KEY_BODY)  ? data.get(FCM.KEY_BODY)  : "";
             String image   = data.containsKey(FCM.KEY_IMAGE) ? data.get(FCM.KEY_IMAGE) : "";
-            String screen  = data.containsKey(FCM.KEY_SCREEN)? data.get(FCM.KEY_SCREEN): "";
 
             Log.d(TAG, "Notification received: " + title);
 
@@ -112,7 +111,7 @@ public class FCMService extends FirebaseMessagingService {
             boolean appInForeground = isAppInForeground();
 
             if (!appInForeground || FCM.shouldShowForegroundNotification()) {
-                showNotification(title, body, image, messageId, screen, data);
+                showNotification(title, body, image, messageId, data);
             }
 
         } else {
@@ -131,7 +130,6 @@ public class FCMService extends FirebaseMessagingService {
             String body,
             String imageUrl,
             String messageId,
-            String targetScreen,
             Map<String, String> fullData) {
 
         NotificationManager manager =
@@ -166,9 +164,7 @@ public class FCMService extends FirebaseMessagingService {
 
         // Pass all data as extras for AppOpenedFromNotification
         tapIntent.putExtra(FCM.KEY_MESSAGE_ID, messageId);
-        if (!targetScreen.isEmpty()) {
-            tapIntent.putExtra(FCM.KEY_SCREEN, targetScreen);
-        }
+
         for (Map.Entry<String, String> entry : fullData.entrySet()) {
             if (!SYSTEM_KEYS.contains(entry.getKey())) {
                 tapIntent.putExtra(entry.getKey(), entry.getValue());
