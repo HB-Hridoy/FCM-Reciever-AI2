@@ -2,6 +2,7 @@ package com.hridoy.fcm;
 
 import com.google.appinventor.components.annotations.*;
 import com.google.appinventor.components.runtime.*;
+import com.google.appinventor.components.runtime.util.YailDictionary;
 import com.google.appinventor.components.runtime.util.YailList;
 import com.google.appinventor.components.runtime.util.YailProcedure;
 
@@ -22,14 +23,10 @@ import com.google.firebase.FirebaseOptions;
 import com.google.firebase.messaging.FirebaseMessaging;
 
 import java.lang.ref.WeakReference;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 @DesignerComponent(
-		version = 25,
+		version = 35,
 		versionName = "1.0.0",
 		description = "Firebase Cloud Messaging receiver extension. Developed by Hridoy.",
 		iconName = "icon.png"
@@ -449,9 +446,9 @@ public class FCM extends AndroidNonvisibleComponent
 					"  • dataKeys   — list of extra data payload keys\n" +
 					"  • dataValues — list of extra data payload values (same order as keys)")
 	public void NotificationReceived(String from, String messageId,
-									 String title, String body, YailList dataKeys, YailList dataValues) {
+									 String title, String body, YailDictionary data) {
 		EventDispatcher.dispatchEvent(this, "NotificationReceived",
-				from, messageId, title, body, dataKeys, dataValues);
+				from, messageId, title, body, data);
 	}
 
 	@SimpleEvent(description =
@@ -462,9 +459,9 @@ public class FCM extends AndroidNonvisibleComponent
 					"  • dataKeys   — list of data payload keys\n" +
 					"  • dataValues — list of data payload values (same order as keys)")
 	public void MessageReceived(String from, String messageId,
-								YailList dataKeys, YailList dataValues) {
+								YailDictionary data) {
 		EventDispatcher.dispatchEvent(this, "MessageReceived",
-				from, messageId, dataKeys, dataValues);
+				from, messageId, data);
 	}
 
 	@SimpleEvent(description =
@@ -475,11 +472,10 @@ public class FCM extends AndroidNonvisibleComponent
 					"  • App in background — fires automatically via onResume\n" +
 					".\n" +
 					"  • messageId    — ID of the tapped notification\n" +
-					"  • dataKeys     — data payload keys\n" +
-					"  • dataValues   — data payload values (same order)")
-	public void AppOpenedFromNotification(String messageId, YailList dataKeys, YailList dataValues) {
+					"  • data     — data payload ")
+	public void AppOpenedFromNotification(String messageId, YailDictionary data) {
 		EventDispatcher.dispatchEvent(this, "AppOpenedFromNotification",
-				messageId, dataKeys, dataValues);
+				messageId, data);
 	}
 
 	@SimpleEvent(description =
@@ -510,11 +506,10 @@ public class FCM extends AndroidNonvisibleComponent
 	static void dispatchMessageReceived(
 			final String from,
 			final String messageId,
-			final YailList keys,
-			final YailList values) {
+			final YailDictionary dataDict) {
 		FCM ext = getActiveInstance();
 		if (ext == null) return;
-		ext.mainHandler.post(() -> ext.MessageReceived(from, messageId, keys, values));
+		ext.mainHandler.post(() -> ext.MessageReceived(from, messageId, dataDict));
 	}
 
 	/**
@@ -525,12 +520,11 @@ public class FCM extends AndroidNonvisibleComponent
 			final String messageId,
 			final String title,
 			final String body,
-			final YailList keys,
-			final YailList values) {
+			final YailDictionary dataDict) {
 		FCM ext = getActiveInstance();
 		if (ext == null) return;
 		ext.mainHandler.post(() ->
-				ext.NotificationReceived(from, messageId, title, body, keys, values));
+				ext.NotificationReceived(from, messageId, title, body, dataDict));
 	}
 
 	/**
@@ -615,25 +609,22 @@ public class FCM extends AndroidNonvisibleComponent
 		if (messageId == null) messageId = intent.getStringExtra(KEY_MESSAGE_ID);
 		if (messageId == null) messageId = "unknown";
 
-		List<String> keys   = new ArrayList<>();
-		List<String> values = new ArrayList<>();
-
+		YailDictionary dataDict = new YailDictionary();
 		for (String key : intent.getExtras().keySet()) {
 			if (!SYSTEM_KEYS.contains(key)) {
-				keys.add(key);
 				Object val = intent.getExtras().get(key);
-				values.add(val != null ? val.toString() : "");
+				dataDict.put(key, val != null ? val.toString() : "");
 			}
 		}
 
+		final YailDictionary finalDict  = dataDict;
+
 		final String   finalId     = messageId;
-		final YailList keyList     = YailList.makeList(keys);
-		final YailList valueList   = YailList.makeList(values);
 
 		Log.d(TAG, "AppOpenedFromNotification: " + finalId );
 
 		mainHandler.post(() ->
-				AppOpenedFromNotification(finalId, keyList, valueList));
+				AppOpenedFromNotification(finalId, finalDict));
 	}
 
 	// ================================================================

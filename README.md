@@ -30,7 +30,7 @@ Firebase Cloud Messaging receiver extension. Developed by Hridoy.
 <img width="240" height="85" alt="TokenReceived" src="https://github.com/user-attachments/assets/77d81e3f-e5f1-4bc4-a6d6-bfb2b9adc4ba" />
 
 Fired when the FCM token is automatically refreshed by Firebase.
-Send the new token to your server immediately.  
+Send the new token to your server immediately.
 
 | Parameter | Type | Desciption                 |
 |-----------|------|----------------------------|
@@ -60,7 +60,7 @@ Always fires in foreground.
 
 
 Fired when a data-only FCM message arrives.
-Delivered regardless of app state. No notification is shown.  
+Delivered regardless of app state. No notification is shown.
 
 | Parameter  | Type | Description                                      |
 |------------|------|--------------------------------------------------|
@@ -91,7 +91,7 @@ Two scenarios:
 ### 5. ErrorOccurred
 <img width="231" height="85" alt="ErrorOccurred" src="https://github.com/user-attachments/assets/281d624e-d195-4069-9e1c-36850e2a6089" />
 
-Fired when any FCM operation fails outside of a callback context.  
+Fired when any FCM operation fails outside of a callback context.
 
 | Parameter | Type | Description                    |
 |-----------|------|--------------------------------|
@@ -251,13 +251,14 @@ Always returns true on Android 12 and below.
 
 ---
 
-## Setters
+## Properties
 
 <details>
-<summary><kbd>Setters (1)</kbd></summary>
+<summary><kbd>Properties (1)</kbd></summary>
 
 ### 1. ShowForegroundNotifications
 <img width="434" height="30" alt="ShowForegroundNotifications" src="https://github.com/user-attachments/assets/fb773b4d-cf8f-40e4-bff7-fd40ea78ce08" />
+<img width="312" height="26" alt="ShowForegroundNotifications" src="https://github.com/user-attachments/assets/5d0d5574-a5dd-469a-bcbe-a025f44150ff" />
 
 Controls whether notifications are shown when the app is in foreground.
 Resets to true each session — call in Screen.Initialize to change.
@@ -269,22 +270,4 @@ Resets to true each session — call in Screen.Initialize to change.
 
 </details>
 
----
 
-## Getters
-
-<details>
-<summary><kbd>Getters (1)</kbd></summary>
-
-### 1. ShowForegroundNotifications
-<img width="312" height="26" alt="ShowForegroundNotifications" src="https://github.com/user-attachments/assets/5d0d5574-a5dd-469a-bcbe-a025f44150ff" />
-
-Controls whether notifications are shown when the app is in foreground.
-Resets to true each session — call in Screen.Initialize to change.
-
-• true = show notification (default)  
-• false = suppress, only fire NotificationReceived event
-
-* Return type: `boolean`
-
-</details>
