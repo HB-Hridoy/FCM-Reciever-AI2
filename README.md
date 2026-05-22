@@ -8,10 +8,10 @@ Firebase Cloud Messaging receiver extension. Developed by Hridoy.
 ## 📝 Specifications
 * **
 📦 **Package:** com.hridoy.fcm  
-💾 **Size:** 6.32 MB  
-⚙️ **Version:** 1.0.0  
+💾 **Size:** 973 KB  
+⚙️ **Version:** 1.0.2  
 📱 **Minimum API Level:** 14  
-📅 **Updated On:** 21-05-2026 SAST  
+📅 **Updated On:** 22-05-2026 SAST  
 💻 **Built & documented using:** [FAST](https://community.appinventor.mit.edu/t/fast-an-efficient-way-to-build-publish-extensions/129103?u=jewel) <small><mark>v6.1.0</mark></small>
 
 ---
