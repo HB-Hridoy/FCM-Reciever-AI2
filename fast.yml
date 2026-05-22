@@ -11,7 +11,7 @@ min_sdk: 14
 # If enabled, the D8 tool will generate desugared jar (classes.dex)
 desugar_dex: true
 # If enabled, extension will be optimized using R8.
-R8: false
+R8: true
 # If enabled, extension will be optimized using ProGuard.
 proguard: false
 # Define specific ProGuard version.
