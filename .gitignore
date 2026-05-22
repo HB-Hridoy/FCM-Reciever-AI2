@@ -2,8 +2,6 @@
 .github
 .fast
 .vscode
-out
 .classpath
 .DS_Store
 .project
-/blocks-v1.0.0
