@@ -26,8 +26,8 @@ import java.lang.ref.WeakReference;
 import java.util.*;
 
 @DesignerComponent(
-		version = 61,
-		versionName = "1.0.1",
+		version = 80,
+		versionName = "1.0.2",
 		description = "Firebase Cloud Messaging receiver extension. Developed by Hridoy.",
 		iconName = "icon.png"
 )
