@@ -140,6 +140,7 @@ public class FCMService extends FirebaseMessagingService {
 
         NotificationManager manager =
                 (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) return;
 
         String channelId   = FCM.getChannelId();
         String channelName = FCM.getChannelName();
@@ -179,11 +180,41 @@ public class FCMService extends FirebaseMessagingService {
         PendingIntent pendingIntent = PendingIntent.getActivity(
                 this, requestCode, tapIntent, piFlags);
 
-        int smallIcon = getApplicationInfo().icon;
+        // ── 2 — ICON RESOLUTION LOGIC ──
+
+        // Resolve small icon
+        String smallIconValue = fullData.getOrDefault(FCM.KEY_SMALL_ICON, "");
+        Bitmap smallIconBitmap = resolveSmallIconBitmap(smallIconValue);
+
+        // Resolve large icon
+        String largeIconValue = fullData.getOrDefault(FCM.KEY_LARGE_ICON, "");
+
+        // Download large icon if not already passed as imageBitmap
+        if (imageBitmap == null && !largeIconValue.isEmpty()) {
+            if (largeIconValue.startsWith("http://") || largeIconValue.startsWith("https://")) {
+                imageBitmap = downloadBitmap(largeIconValue);
+            } else {
+                // Try asset
+                java.io.InputStream is = null;
+                try {
+                    String assetName = largeIconValue.contains(".")
+                            ? largeIconValue : largeIconValue + ".png";
+                    is = getAssets().open(assetName);
+                    imageBitmap = BitmapFactory.decodeStream(is);
+                } catch (Exception e) {
+                    Log.w(TAG, "Large icon asset not found: " + largeIconValue);
+                } finally {
+                    if (is != null) {
+                        try { is.close(); } catch (Exception ignored) {}
+                    }
+                }
+            }
+        }
+
+        // ── 3 — BUILDER CONFIGURATION & APPLYING ICONS ──
 
         NotificationCompat.Builder builder =
                 new NotificationCompat.Builder(this, channelId)
-                        .setSmallIcon(smallIcon)
                         .setContentTitle(title)
                         .setContentText(body)
                         .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -191,6 +222,16 @@ public class FCMService extends FirebaseMessagingService {
                         .setContentIntent(pendingIntent)
                         .setStyle(new NotificationCompat.BigTextStyle().bigText(body));
 
+        // Apply small icon
+        if (smallIconBitmap != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            builder.setSmallIcon(
+                    androidx.core.graphics.drawable.IconCompat.createWithBitmap(smallIconBitmap)
+            );
+        } else {
+            builder.setSmallIcon(getApplicationInfo().icon); // fallback
+        }
+
+        // Apply large icon & layout styling rules
         if (imageBitmap != null) {
             builder.setLargeIcon(imageBitmap)
                     .setStyle(new NotificationCompat.BigPictureStyle()
@@ -224,6 +265,40 @@ public class FCMService extends FirebaseMessagingService {
             return null;
         } finally {
             if (conn != null) conn.disconnect();
+        }
+    }
+
+    /**
+     * Resolves a small icon for use with IconCompat.createWithBitmap().
+     * Source priority:
+     *   1. URL → download bitmap
+     *   2. Asset name → load from app assets folder
+     *   3. null → caller falls back to app icon
+     *
+     * Returns null if nothing found or Android < 6.
+     */
+    private Bitmap resolveSmallIconBitmap(String iconValue) {
+        if (iconValue == null || iconValue.trim().isEmpty()) return null;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null; // API 23+
+
+        // URL path
+        if (iconValue.startsWith("http://") || iconValue.startsWith("https://")) {
+            return downloadBitmap(iconValue); // reuse existing method
+        }
+
+        // Asset name (e.g. "notif_icon" or "notif_icon.png")
+        try {
+            String assetName = iconValue.contains("/")
+                    ? iconValue  // treat as path e.g. "icons/notif.png"
+                    : iconValue + (iconValue.contains(".") ? "" : ".png");
+
+            InputStream is = getAssets().open(assetName);
+            Bitmap bmp = BitmapFactory.decodeStream(is);
+            is.close();
+            return bmp;
+        } catch (Exception e) {
+            Log.w(TAG, "Asset icon not found: " + iconValue);
+            return null;
         }
     }
 
