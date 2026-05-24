@@ -180,29 +180,27 @@ public class FCMService extends FirebaseMessagingService {
         PendingIntent pendingIntent = PendingIntent.getActivity(
                 this, requestCode, tapIntent, piFlags);
 
-        // ── 2 — ICON RESOLUTION LOGIC ──
-
-        // Resolve small icon
+        // ── RESOLVE SMALL ICON GRAPHIC ──
         String smallIconValue = fullData.getOrDefault(FCM.KEY_SMALL_ICON, "");
         Bitmap smallIconBitmap = resolveSmallIconBitmap(smallIconValue);
 
-        // Resolve large icon
-        String largeIconValue = fullData.getOrDefault(FCM.KEY_LARGE_ICON, "");
+        // ── RESOLVE DECOUPLED AVATAR GRAPHIC ──
+        Bitmap avatarBitmap = null;
+        String avatarValue = fullData.getOrDefault(FCM.KEY_AVATAR, "");
 
-        // Download large icon if not already passed as imageBitmap
-        if (imageBitmap == null && !largeIconValue.isEmpty()) {
-            if (largeIconValue.startsWith("http://") || largeIconValue.startsWith("https://")) {
-                imageBitmap = downloadBitmap(largeIconValue);
+        if (!avatarValue.isEmpty()) {
+            if (avatarValue.startsWith("http://") || avatarValue.startsWith("https://")) {
+                avatarBitmap = downloadBitmap(avatarValue);
             } else {
-                // Try asset
+                // Try loading asset file matching the provided string name layout
                 java.io.InputStream is = null;
                 try {
-                    String assetName = largeIconValue.contains(".")
-                            ? largeIconValue : largeIconValue + ".png";
+                    String assetName = avatarValue.contains(".")
+                            ? avatarValue : avatarValue + ".png";
                     is = getAssets().open(assetName);
-                    imageBitmap = BitmapFactory.decodeStream(is);
+                    avatarBitmap = BitmapFactory.decodeStream(is);
                 } catch (Exception e) {
-                    Log.w(TAG, "Large icon asset not found: " + largeIconValue);
+                    Log.w(TAG, "Avatar asset payload retrieval failed: " + avatarValue);
                 } finally {
                     if (is != null) {
                         try { is.close(); } catch (Exception ignored) {}
@@ -211,33 +209,49 @@ public class FCMService extends FirebaseMessagingService {
             }
         }
 
-        // ── 3 — BUILDER CONFIGURATION & APPLYING ICONS ──
+        // Fallback rule: If no explicit avatar asset was passed,
+        // use the big picture banner as a temporary avatar thumbnail shortcut.
+        if (avatarBitmap == null && imageBitmap != null) {
+            avatarBitmap = imageBitmap;
+        }
 
+        // ── 3. BUILDER CONFIGURATION & APPLYING ICONS ──
         NotificationCompat.Builder builder =
                 new NotificationCompat.Builder(this, channelId)
                         .setContentTitle(title)
                         .setContentText(body)
                         .setPriority(NotificationCompat.PRIORITY_HIGH)
                         .setAutoCancel(true)
-                        .setContentIntent(pendingIntent)
-                        .setStyle(new NotificationCompat.BigTextStyle().bigText(body));
+                        .setContentIntent(pendingIntent);
 
-        // Apply small icon
+        // Apply small icon (Status bar silhouette)
         if (smallIconBitmap != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             builder.setSmallIcon(
                     androidx.core.graphics.drawable.IconCompat.createWithBitmap(smallIconBitmap)
             );
         } else {
-            builder.setSmallIcon(getApplicationInfo().icon); // fallback
+            builder.setSmallIcon(getApplicationInfo().icon);
         }
 
-        // Apply large icon & layout styling rules
-        if (imageBitmap != null) {
-            builder.setLargeIcon(imageBitmap)
-                    .setStyle(new NotificationCompat.BigPictureStyle()
-                            .bigPicture(imageBitmap)
-                            .bigLargeIcon((Bitmap) null));
+        // Apply large icon (Sets the user chat profile avatar next to message body lines)
+        if (avatarBitmap != null) {
+            builder.setLargeIcon(avatarBitmap);
         }
+
+        // ── CRITICAL LAYOUT STRUCTURAL ROUTING RULES ──
+        if (imageBitmap != null) {
+            // CASE A: A big image banner payload is present. Use expanding BigPictureStyle safely.
+            builder.setStyle(new NotificationCompat.BigPictureStyle()
+                    .bigPicture(imageBitmap)
+                    .bigLargeIcon((Bitmap) null)); // Prevents the avatar from duplicating inside the expanded photo frame
+        }
+        /*
+         CASE B: Standard alert message.
+         Completely removed BigTextStyle fallback here! Leaving layout unstyled allows
+         Android to treat this as a standard notification template card, which forces your
+         custom Large Icon to stay beautifully locked inside the small circular app badge frame.
+        */
+
 
         manager.notify(requestCode, builder.build());
         Log.d(TAG, "Notification shown id=" + requestCode);
