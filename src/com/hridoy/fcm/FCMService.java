@@ -15,6 +15,8 @@ import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.Person;
 import androidx.core.graphics.drawable.IconCompat;
+import androidx.core.content.pm.ShortcutInfoCompat;
+import androidx.core.content.pm.ShortcutManagerCompat;
 
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
@@ -171,7 +173,8 @@ public class FCMService extends FirebaseMessagingService {
         Bitmap smallIconBitmap = resolveIconBitmap(smallIconValue);
 
         // Build tap intent
-        PendingIntent tapIntent = buildTapIntent(messageId, data, NOTIF_COUNTER.get());
+        TapIntents tap = buildTapIntent(messageId, data, NOTIF_COUNTER.get());
+        PendingIntent tapIntent = tap.pending;
 
         // Route to correct style
         switch (styleName) {
@@ -185,11 +188,11 @@ public class FCMService extends FirebaseMessagingService {
                 break;
             case "individualMessage":
                 showIndividualMessage(manager, channelId, messageId, style,
-                        smallIconBitmap, tapIntent);
+                        smallIconBitmap, tap);
                 break;
             case "groupMessage":
                 showGroupMessage(manager, channelId, messageId, style,
-                        smallIconBitmap, tapIntent);
+                        smallIconBitmap, tap);
                 break;
             default: // "basic"
                 showBasic(manager, channelId, messageId, style,
@@ -302,7 +305,7 @@ public class FCMService extends FirebaseMessagingService {
 
     private void showIndividualMessage(NotificationManager manager, String channelId,
                                        String messageId, JSONObject style,
-                                       Bitmap smallIconBitmap, PendingIntent tapIntent) {
+                                       Bitmap smallIconBitmap, TapIntents tap) {
 
         if (style == null) return;
 
@@ -353,13 +356,15 @@ public class FCMService extends FirebaseMessagingService {
                         .setStyle(msgStyle)
                         .setPriority(NotificationCompat.PRIORITY_HIGH)
                         .setAutoCancel(true)
-                        .setContentIntent(tapIntent);
+                        .setContentIntent(tap.pending)
+                        .setShortcutId(personId);
 
         applySmallIcon(builder, smallIconBitmap);
 
         // setLargeIcon drives the left-side avatar on Android 7-8
         if (avatarBitmap != null) builder.setLargeIcon(avatarBitmap);
 
+        publishShortcut(personId, personName, sender, tap.raw);
         manager.notify(notifId, builder.build());
         Log.d(TAG, "individualMessage notif id=" + notifId + " person=" + personId);
     }
@@ -370,7 +375,7 @@ public class FCMService extends FirebaseMessagingService {
 
     private void showGroupMessage(NotificationManager manager, String channelId,
                                   String messageId, JSONObject style,
-                                  Bitmap smallIconBitmap, PendingIntent tapIntent) {
+                                  Bitmap smallIconBitmap, TapIntents tap) {
 
         if (style == null) return;
 
@@ -428,7 +433,8 @@ public class FCMService extends FirebaseMessagingService {
                         .setStyle(msgStyle)
                         .setPriority(NotificationCompat.PRIORITY_HIGH)
                         .setAutoCancel(true)
-                        .setContentIntent(tapIntent);
+                        .setContentIntent(tap.pending)
+                        .setShortcutId(groupId);
 
         applySmallIcon(builder, smallIconBitmap);
 
@@ -437,6 +443,7 @@ public class FCMService extends FirebaseMessagingService {
         Bitmap collapseIcon = groupIcon != null ? groupIcon : personIcon;
         if (collapseIcon != null) builder.setLargeIcon(collapseIcon);
 
+        publishShortcut(groupId, groupName, sender, tap.raw);
         manager.notify(notifId, builder.build());
         Log.d(TAG, "groupMessage notif id=" + notifId + " group=" + groupId);
     }
@@ -445,31 +452,41 @@ public class FCMService extends FirebaseMessagingService {
     // HELPERS
     // ================================================================
 
-    private PendingIntent buildTapIntent(String messageId, Map<String, String> data, int requestCode) {
-        Intent tapIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());
-        if (tapIntent == null) {
-            tapIntent = new Intent();
-            tapIntent.setPackage(getPackageName());
+    private TapIntents buildTapIntent(String messageId, Map<String, String> data, int requestCode) {
+        Intent intent = getPackageManager().getLaunchIntentForPackage(getPackageName());
+        if (intent == null) {
+            intent = new Intent();
+            intent.setPackage(getPackageName());
         }
-        tapIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        tapIntent.putExtra(FCM.KEY_MESSAGE_ID, messageId);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        intent.putExtra(FCM.KEY_MESSAGE_ID, messageId);
+
         for (Map.Entry<String, String> entry : data.entrySet()) {
             if (!SYSTEM_KEYS.contains(entry.getKey())) {
-                tapIntent.putExtra(entry.getKey(), entry.getValue());
+                intent.putExtra(entry.getKey(), entry.getValue());
             }
         }
+
+        // Read the style JSON block to preserve target chat routing IDs on tap
         String nsJson = data.getOrDefault(FCM.KEY_NOTIFICATION_STYLE, "");
         if (!nsJson.isEmpty()) {
             try {
                 JSONObject ns = new JSONObject(nsJson);
                 String pid = ns.optString("personId", "");
                 String gid = ns.optString("groupId",  "");
-                if (!pid.isEmpty()) tapIntent.putExtra("fcm_person_id", pid);
-                if (!gid.isEmpty()) tapIntent.putExtra("fcm_group_id",  gid);
+                if (!pid.isEmpty()) intent.putExtra("fcm_person_id", pid);
+                if (!gid.isEmpty()) intent.putExtra("fcm_group_id",  gid);
             } catch (Exception ignored) {}
         }
-        return PendingIntent.getActivity(this, requestCode, tapIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        int pendingFlags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                : PendingIntent.FLAG_UPDATE_CURRENT;
+
+        PendingIntent pending = PendingIntent.getActivity(
+                this, requestCode, intent, pendingFlags);
+
+        return new TapIntents(intent, pending);
     }
 
     private void applySmallIcon(NotificationCompat.Builder builder, Bitmap smallIconBitmap) {
@@ -495,6 +512,54 @@ public class FCMService extends FirebaseMessagingService {
         } catch (Exception e) {
             Log.w(TAG, "Icon asset not found: " + value);
             return null;
+        }
+    }
+
+    /**
+     * Publishes a dynamic shortcut linked to a Person.
+     * Required on API 30+ to show the avatar on the LEFT side
+     * of a collapsed MessagingStyle notification.
+     *
+     * Both the shortcut and notification share the same shortcutId —
+     * that shared ID is what Android uses to render the correct UI.
+     *
+     * Safe to call on API < 30 — ShortcutManagerCompat handles it gracefully.
+     *
+     * @param shortcutId  shared ID between shortcut and notification
+     * @param personName  display name shown under the app icon on long press
+     * @param person      the Person object used in MessagingStyle
+     * @param tapIntent   intent that opens the app when shortcut is tapped
+     */
+    private void publishShortcut(
+            String shortcutId,
+            String personName,
+            Person person,
+            Intent tapIntent) {
+
+        ShortcutInfoCompat.Builder builder = new ShortcutInfoCompat.Builder(this, shortcutId)
+                .setLongLived(true)
+                .setIntent(tapIntent)
+                .setShortLabel(personName.length() > 10
+                        ? personName.substring(0, 10)
+                        : personName)
+                .setPerson(person);
+
+        // Set shortcut icon from Person's icon if available
+        if (person.getIcon() != null) {
+            builder.setIcon(person.getIcon());
+        }
+
+        ShortcutManagerCompat.pushDynamicShortcut(this, builder.build());
+    }
+
+    /** Holds both raw Intent and wrapped PendingIntent from a single build call. */
+    private static class TapIntents {
+        final Intent        raw;
+        final PendingIntent pending;
+
+        TapIntents(Intent raw, PendingIntent pending) {
+            this.raw     = raw;
+            this.pending = pending;
         }
     }
 
