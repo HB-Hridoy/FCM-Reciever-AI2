@@ -26,7 +26,7 @@ import java.lang.ref.WeakReference;
 import java.util.*;
 
 @DesignerComponent(
-		version = 83,
+		version = 85,
 		versionName = "1.0.2",
 		description = "Firebase Cloud Messaging receiver extension. Developed by Hridoy.",
 		iconName = "icon.png"
@@ -45,6 +45,7 @@ public class FCM extends AndroidNonvisibleComponent
 	static final String KEY_SMALL_ICON = "fcm_small_icon";
 	static final String KEY_LARGE_ICON = "fcm_large_icon";
 	static final String KEY_MESSAGE_ID = "fcm_message_id";
+	static final String KEY_NOTIFICATION_STYLE = "fcm_notification_style";
 
 	// Internal FCM extras added by the system — filtered from data payloads
 	private static final List<String> SYSTEM_KEYS = Arrays.asList(
@@ -53,7 +54,7 @@ public class FCM extends AndroidNonvisibleComponent
 			KEY_MESSAGE_ID, "gcm.notification.body", "gcm.notification.title",
 			"gcm.notification.image", "android.support.content.wakelockid",
 			"androidx.content.wakelockid",
-			KEY_TITLE, KEY_BODY, KEY_IMAGE, KEY_SMALL_ICON, KEY_LARGE_ICON
+			KEY_TITLE, KEY_BODY, KEY_IMAGE, KEY_SMALL_ICON, KEY_LARGE_ICON, KEY_NOTIFICATION_STYLE
 	);
 
 	// Notification channel config
@@ -611,6 +612,14 @@ public class FCM extends AndroidNonvisibleComponent
 		if (messageId == null) messageId = intent.getStringExtra(KEY_MESSAGE_ID);
 		if (messageId == null) messageId = "unknown";
 
+		// Clear messaging style state so next message starts fresh
+		// personId is stored as extra for individualMessage taps
+		// groupId is stored as extra for groupMessage taps
+		String personId = intent.getStringExtra("fcm_person_id");
+		String groupId  = intent.getStringExtra("fcm_group_id");
+		if (personId != null && !personId.isEmpty()) FCMService.clearConversation(personId);
+		if (groupId  != null && !groupId.isEmpty())  FCMService.clearConversation(groupId);
+
 		YailDictionary dataDict = new YailDictionary();
 		for (String key : intent.getExtras().keySet()) {
 			if (!SYSTEM_KEYS.contains(key)) {
@@ -619,14 +628,10 @@ public class FCM extends AndroidNonvisibleComponent
 			}
 		}
 
-		final YailDictionary finalDict  = dataDict;
+		final String         finalId   = messageId;
+		final YailDictionary finalDict = dataDict;
 
-		final String   finalId     = messageId;
-
-		Log.d(TAG, "AppOpenedFromNotification: " + finalId );
-
-		mainHandler.post(() ->
-				AppOpenedFromNotification(finalId, finalDict));
+		mainHandler.post(() -> AppOpenedFromNotification(finalId, finalDict));
 	}
 
 	// ================================================================
