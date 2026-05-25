@@ -140,6 +140,7 @@ public class FCMService extends FirebaseMessagingService {
 
         NotificationManager manager =
                 (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) return;
 
         String channelId   = FCM.getChannelId();
         String channelName = FCM.getChannelName();
@@ -179,24 +180,78 @@ public class FCMService extends FirebaseMessagingService {
         PendingIntent pendingIntent = PendingIntent.getActivity(
                 this, requestCode, tapIntent, piFlags);
 
-        int smallIcon = getApplicationInfo().icon;
+        // ── RESOLVE SMALL ICON GRAPHIC ──
+        String smallIconValue = fullData.getOrDefault(FCM.KEY_SMALL_ICON, "");
+        Bitmap smallIconBitmap = resolveSmallIconBitmap(smallIconValue);
 
+        // ── RESOLVE DECOUPLED LARGE ICON GRAPHIC ──
+        Bitmap largeIconBitmap = null;
+        String largeIconValue = fullData.getOrDefault(FCM.KEY_LARGE_ICON, "");
+
+        if (!largeIconValue.isEmpty()) {
+            if (largeIconValue.startsWith("http://") || largeIconValue.startsWith("https://")) {
+                largeIconBitmap = downloadBitmap(largeIconValue);
+            } else {
+                // Try loading asset file matching the provided string name layout
+                java.io.InputStream is = null;
+                try {
+                    String assetName = largeIconValue.contains(".")
+                            ? largeIconValue : largeIconValue + ".png";
+                    is = getAssets().open(assetName);
+                    largeIconBitmap = BitmapFactory.decodeStream(is);
+                } catch (Exception e) {
+                    Log.w(TAG, "Large icon asset payload retrieval failed: " + largeIconValue);
+                } finally {
+                    if (is != null) {
+                        try { is.close(); } catch (Exception ignored) {}
+                    }
+                }
+            }
+        }
+
+        // Fallback rule: If no explicit large icon asset was passed,
+        // use the big picture banner as a temporary large icon thumbnail shortcut.
+        if (largeIconBitmap == null && imageBitmap != null) {
+            largeIconBitmap = imageBitmap;
+        }
+
+        // ── 3. BUILDER CONFIGURATION & APPLYING ICONS ──
         NotificationCompat.Builder builder =
                 new NotificationCompat.Builder(this, channelId)
-                        .setSmallIcon(smallIcon)
                         .setContentTitle(title)
                         .setContentText(body)
                         .setPriority(NotificationCompat.PRIORITY_HIGH)
                         .setAutoCancel(true)
-                        .setContentIntent(pendingIntent)
-                        .setStyle(new NotificationCompat.BigTextStyle().bigText(body));
+                        .setContentIntent(pendingIntent);
 
-        if (imageBitmap != null) {
-            builder.setLargeIcon(imageBitmap)
-                    .setStyle(new NotificationCompat.BigPictureStyle()
-                            .bigPicture(imageBitmap)
-                            .bigLargeIcon((Bitmap) null));
+        // Apply small icon (Status bar silhouette)
+        if (smallIconBitmap != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            builder.setSmallIcon(
+                    androidx.core.graphics.drawable.IconCompat.createWithBitmap(smallIconBitmap)
+            );
+        } else {
+            builder.setSmallIcon(getApplicationInfo().icon);
         }
+
+        // Apply large icon (Sets the user chat profile large icon next to message body lines)
+        if (largeIconBitmap != null) {
+            builder.setLargeIcon(largeIconBitmap);
+        }
+
+        // ── CRITICAL LAYOUT STRUCTURAL ROUTING RULES ──
+        if (imageBitmap != null) {
+            // CASE A: A big image banner payload is present. Use expanding BigPictureStyle safely.
+            builder.setStyle(new NotificationCompat.BigPictureStyle()
+                    .bigPicture(imageBitmap)
+                    .bigLargeIcon((Bitmap) null)); // Prevents the large icon from duplicating inside the expanded photo frame
+        }
+        /*
+         CASE B: Standard alert message.
+         Completely removed BigTextStyle fallback here! Leaving layout unstyled allows
+         Android to treat this as a standard notification template card, which forces your
+         custom Large Icon to stay beautifully locked inside the small circular app badge frame.
+        */
+
 
         manager.notify(requestCode, builder.build());
         Log.d(TAG, "Notification shown id=" + requestCode);
@@ -224,6 +279,40 @@ public class FCMService extends FirebaseMessagingService {
             return null;
         } finally {
             if (conn != null) conn.disconnect();
+        }
+    }
+
+    /**
+     * Resolves a small icon for use with IconCompat.createWithBitmap().
+     * Source priority:
+     *   1. URL → download bitmap
+     *   2. Asset name → load from app assets folder
+     *   3. null → caller falls back to app icon
+     *
+     * Returns null if nothing found or Android < 6.
+     */
+    private Bitmap resolveSmallIconBitmap(String iconValue) {
+        if (iconValue == null || iconValue.trim().isEmpty()) return null;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null; // API 23+
+
+        // URL path
+        if (iconValue.startsWith("http://") || iconValue.startsWith("https://")) {
+            return downloadBitmap(iconValue); // reuse existing method
+        }
+
+        // Asset name (e.g. "notif_icon" or "notif_icon.png")
+        try {
+            String assetName = iconValue.contains("/")
+                    ? iconValue  // treat as path e.g. "icons/notif.png"
+                    : iconValue + (iconValue.contains(".") ? "" : ".png");
+
+            InputStream is = getAssets().open(assetName);
+            Bitmap bmp = BitmapFactory.decodeStream(is);
+            is.close();
+            return bmp;
+        } catch (Exception e) {
+            Log.w(TAG, "Asset icon not found: " + iconValue);
+            return null;
         }
     }
 
