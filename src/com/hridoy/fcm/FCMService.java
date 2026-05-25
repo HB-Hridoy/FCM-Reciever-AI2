@@ -184,23 +184,23 @@ public class FCMService extends FirebaseMessagingService {
         String smallIconValue = fullData.getOrDefault(FCM.KEY_SMALL_ICON, "");
         Bitmap smallIconBitmap = resolveSmallIconBitmap(smallIconValue);
 
-        // ── RESOLVE DECOUPLED AVATAR GRAPHIC ──
-        Bitmap avatarBitmap = null;
-        String avatarValue = fullData.getOrDefault(FCM.KEY_AVATAR, "");
+        // ── RESOLVE DECOUPLED LARGE ICON GRAPHIC ──
+        Bitmap largeIconBitmap = null;
+        String largeIconValue = fullData.getOrDefault(FCM.KEY_LARGE_ICON, "");
 
-        if (!avatarValue.isEmpty()) {
-            if (avatarValue.startsWith("http://") || avatarValue.startsWith("https://")) {
-                avatarBitmap = downloadBitmap(avatarValue);
+        if (!largeIconValue.isEmpty()) {
+            if (largeIconValue.startsWith("http://") || largeIconValue.startsWith("https://")) {
+                largeIconBitmap = downloadBitmap(largeIconValue);
             } else {
                 // Try loading asset file matching the provided string name layout
                 java.io.InputStream is = null;
                 try {
-                    String assetName = avatarValue.contains(".")
-                            ? avatarValue : avatarValue + ".png";
+                    String assetName = largeIconValue.contains(".")
+                            ? largeIconValue : largeIconValue + ".png";
                     is = getAssets().open(assetName);
-                    avatarBitmap = BitmapFactory.decodeStream(is);
+                    largeIconBitmap = BitmapFactory.decodeStream(is);
                 } catch (Exception e) {
-                    Log.w(TAG, "Avatar asset payload retrieval failed: " + avatarValue);
+                    Log.w(TAG, "Large icon asset payload retrieval failed: " + largeIconValue);
                 } finally {
                     if (is != null) {
                         try { is.close(); } catch (Exception ignored) {}
@@ -209,10 +209,10 @@ public class FCMService extends FirebaseMessagingService {
             }
         }
 
-        // Fallback rule: If no explicit avatar asset was passed,
-        // use the big picture banner as a temporary avatar thumbnail shortcut.
-        if (avatarBitmap == null && imageBitmap != null) {
-            avatarBitmap = imageBitmap;
+        // Fallback rule: If no explicit large icon asset was passed,
+        // use the big picture banner as a temporary large icon thumbnail shortcut.
+        if (largeIconBitmap == null && imageBitmap != null) {
+            largeIconBitmap = imageBitmap;
         }
 
         // ── 3. BUILDER CONFIGURATION & APPLYING ICONS ──
@@ -233,9 +233,9 @@ public class FCMService extends FirebaseMessagingService {
             builder.setSmallIcon(getApplicationInfo().icon);
         }
 
-        // Apply large icon (Sets the user chat profile avatar next to message body lines)
-        if (avatarBitmap != null) {
-            builder.setLargeIcon(avatarBitmap);
+        // Apply large icon (Sets the user chat profile large icon next to message body lines)
+        if (largeIconBitmap != null) {
+            builder.setLargeIcon(largeIconBitmap);
         }
 
         // ── CRITICAL LAYOUT STRUCTURAL ROUTING RULES ──
@@ -243,7 +243,7 @@ public class FCMService extends FirebaseMessagingService {
             // CASE A: A big image banner payload is present. Use expanding BigPictureStyle safely.
             builder.setStyle(new NotificationCompat.BigPictureStyle()
                     .bigPicture(imageBitmap)
-                    .bigLargeIcon((Bitmap) null)); // Prevents the avatar from duplicating inside the expanded photo frame
+                    .bigLargeIcon((Bitmap) null)); // Prevents the large icon from duplicating inside the expanded photo frame
         }
         /*
          CASE B: Standard alert message.

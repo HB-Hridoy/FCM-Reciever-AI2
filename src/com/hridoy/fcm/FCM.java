@@ -26,7 +26,7 @@ import java.lang.ref.WeakReference;
 import java.util.*;
 
 @DesignerComponent(
-		version = 82,
+		version = 83,
 		versionName = "1.0.2",
 		description = "Firebase Cloud Messaging receiver extension. Developed by Hridoy.",
 		iconName = "icon.png"
@@ -43,7 +43,7 @@ public class FCM extends AndroidNonvisibleComponent
 	static final String KEY_BODY       = "fcm_body";
 	static final String KEY_IMAGE      = "fcm_image";
 	static final String KEY_SMALL_ICON = "fcm_small_icon";
-	static final String KEY_AVATAR = "fcm_avatar";
+	static final String KEY_LARGE_ICON = "fcm_large_icon";
 	static final String KEY_MESSAGE_ID = "fcm_message_id";
 
 	// Internal FCM extras added by the system — filtered from data payloads
@@ -53,7 +53,7 @@ public class FCM extends AndroidNonvisibleComponent
 			KEY_MESSAGE_ID, "gcm.notification.body", "gcm.notification.title",
 			"gcm.notification.image", "android.support.content.wakelockid",
 			"androidx.content.wakelockid",
-			KEY_TITLE, KEY_BODY, KEY_IMAGE, KEY_SMALL_ICON, KEY_AVATAR
+			KEY_TITLE, KEY_BODY, KEY_IMAGE, KEY_SMALL_ICON, KEY_LARGE_ICON
 	);
 
 	// Notification channel config
