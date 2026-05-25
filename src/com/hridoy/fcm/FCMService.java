@@ -31,7 +31,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -42,9 +41,7 @@ public class FCMService extends FirebaseMessagingService {
 
     private static final AtomicInteger NOTIF_COUNTER = new AtomicInteger(1000);
 
-    // Single background thread for all FCMService work.
-    // onMessageReceived() runs on main thread — we immediately hand off
-    // all work to this executor to prevent ANR.
+    // Single background thread for all FCMService work to prevent ANRs
     private static final ExecutorService executor = Executors.newSingleThreadExecutor();
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -57,6 +54,10 @@ public class FCMService extends FirebaseMessagingService {
     // Fixed notification ID per conversation/group key
     private static final ConcurrentHashMap<String, Integer>
             styleNotifIds = new ConcurrentHashMap<>();
+
+    // Caches processed group avatars globally so incoming senders cannot overwrite group imagery
+    private static final ConcurrentHashMap<String, Bitmap>
+            groupIconCache = new ConcurrentHashMap<>();
 
     // ── System keys — stripped from user-facing data dict ────────────
     private static final List<String> SYSTEM_KEYS = Arrays.asList(
@@ -75,6 +76,7 @@ public class FCMService extends FirebaseMessagingService {
         if (key == null || key.isEmpty()) return;
         activeStyles.remove(key);
         styleNotifIds.remove(key);
+        groupIconCache.remove(key);
         Log.d(TAG, "Conversation cleared: " + key);
     }
 
@@ -179,24 +181,19 @@ public class FCMService extends FirebaseMessagingService {
         // Route to correct style
         switch (styleName) {
             case "bigText":
-                showBigText(manager, channelId, messageId, style,
-                        smallIconBitmap, tapIntent);
+                showBigText(manager, channelId, messageId, style, smallIconBitmap, tapIntent);
                 break;
             case "bigPicture":
-                showBigPicture(manager, channelId, messageId, style,
-                        smallIconBitmap, tapIntent);
+                showBigPicture(manager, channelId, messageId, style, smallIconBitmap, tapIntent);
                 break;
             case "individualMessage":
-                showIndividualMessage(manager, channelId, messageId, style,
-                        smallIconBitmap, tap);
+                showIndividualMessage(manager, channelId, messageId, style, smallIconBitmap, tap);
                 break;
             case "groupMessage":
-                showGroupMessage(manager, channelId, messageId, style,
-                        smallIconBitmap, tap);
+                showGroupMessage(manager, channelId, messageId, style, smallIconBitmap, tap);
                 break;
-            default: // "basic"
-                showBasic(manager, channelId, messageId, style,
-                        smallIconBitmap, tapIntent);
+            default:
+                showBasic(manager, channelId, messageId, style, smallIconBitmap, tapIntent);
                 break;
         }
     }
@@ -315,27 +312,23 @@ public class FCMService extends FirebaseMessagingService {
         String personImageUrl = style.optString("personImage", "");
         String message    = style.optString("message",    "");
 
-        if (personId.isEmpty()) {
-            Log.w(TAG, "individualMessage: personId is required");
-            return;
+        if (personId.isEmpty()) return;
+
+        Bitmap rawIcon = !personIconUrl.isEmpty() ? downloadBitmap(personIconUrl) : null;
+        if (rawIcon == null && !personImageUrl.isEmpty()) {
+            rawIcon = downloadBitmap(personImageUrl);
         }
+        Bitmap circularAvatar = rawIcon != null ? getCircularBitmap(rawIcon) : null;
 
-        // Download assets
-        Bitmap personIcon  = !personIconUrl.isEmpty()  ? downloadBitmap(personIconUrl)  : null;
-        Bitmap personImage = !personImageUrl.isEmpty() ? downloadBitmap(personImageUrl) : null;
-
-        // Use personIcon for both avatar positions
-        // Fall back to personImage if no icon
-        Bitmap avatarBitmap = personIcon != null ? personIcon : personImage;
-
-        // Build sender Person
-        Person.Builder senderBuilder = new Person.Builder().setName(personName);
-        if (avatarBitmap != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            senderBuilder.setIcon(IconCompat.createWithBitmap(avatarBitmap));
+        Person.Builder senderBuilder = new Person.Builder().setName(personName).setKey(personId);
+        if (circularAvatar != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            senderBuilder.setIcon(IconCompat.createWithBitmap(circularAvatar));
         }
         Person sender = senderBuilder.build();
 
-        // Get or create MessagingStyle for this person
+        // FIXED: Set explicit space user placeholder to satisfy Android validation checks cleanly
+        Person userMe = new Person.Builder().setName(" ").setKey("user_me").build();
+
         styleNotifIds.putIfAbsent(personId, NOTIF_COUNTER.getAndIncrement());
         int notifId = styleNotifIds.get(personId);
 
@@ -343,9 +336,8 @@ public class FCMService extends FirebaseMessagingService {
         if (activeStyles.containsKey(personId)) {
             msgStyle = activeStyles.get(personId);
         } else {
-            // For 1-on-1: pass sender as the "user" so their avatar
-            // shows in the collapsed notification row on Android 9+
-            msgStyle = new NotificationCompat.MessagingStyle(sender);
+            msgStyle = new NotificationCompat.MessagingStyle(userMe);
+            msgStyle.setGroupConversation(false);
             activeStyles.put(personId, msgStyle);
         }
 
@@ -360,13 +352,12 @@ public class FCMService extends FirebaseMessagingService {
                         .setShortcutId(personId);
 
         applySmallIcon(builder, smallIconBitmap);
-
-        // setLargeIcon drives the left-side avatar on Android 7-8
-        if (avatarBitmap != null) builder.setLargeIcon(avatarBitmap);
+        if (circularAvatar != null) {
+            builder.setLargeIcon(circularAvatar);
+        }
 
         publishShortcut(personId, personName, sender, tap.raw);
         manager.notify(notifId, builder.build());
-        Log.d(TAG, "individualMessage notif id=" + notifId + " person=" + personId);
     }
 
     // ================================================================
@@ -376,7 +367,6 @@ public class FCMService extends FirebaseMessagingService {
     private void showGroupMessage(NotificationManager manager, String channelId,
                                   String messageId, JSONObject style,
                                   Bitmap smallIconBitmap, TapIntents tap) {
-
         if (style == null) return;
 
         String groupId    = style.optString("groupId",    "");
@@ -387,40 +377,52 @@ public class FCMService extends FirebaseMessagingService {
         String personIconUrl = style.optString("personIcon", "");
         String message    = style.optString("message",    "");
 
-        if (groupId.isEmpty()) {
-            Log.w(TAG, "groupMessage: groupId is required");
-            return;
-        }
+        if (groupId.isEmpty()) return;
 
-        // Download assets
-        Bitmap groupIcon  = !groupIconUrl.isEmpty()  ? downloadBitmap(groupIconUrl)  : null;
-        Bitmap personIcon = !personIconUrl.isEmpty() ? downloadBitmap(personIconUrl) : null;
-
-        // Build sender Person (the person sending this message)
-        Person.Builder senderBuilder = new Person.Builder().setName(personName);
-        if (personIcon != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            senderBuilder.setIcon(IconCompat.createWithBitmap(personIcon));
-        }
-        Person sender = senderBuilder.build();
-
-        // Get or create MessagingStyle for this group
         styleNotifIds.putIfAbsent(groupId, NOTIF_COUNTER.getAndIncrement());
         int notifId = styleNotifIds.get(groupId);
 
+        // 1. Process Sender Details (The person typing right now)
+        Bitmap rawPersonIcon = !personIconUrl.isEmpty() ? downloadBitmap(personIconUrl) : null;
+        Bitmap circularPersonIcon = rawPersonIcon != null ? getCircularBitmap(rawPersonIcon) : null;
+
+        Person.Builder senderBuilder = new Person.Builder().setName(personName).setKey(personId);
+        if (circularPersonIcon != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            senderBuilder.setIcon(IconCompat.createWithBitmap(circularPersonIcon));
+        }
+        Person sender = senderBuilder.build();
+
         NotificationCompat.MessagingStyle msgStyle;
+        Bitmap groupLargeIcon = null;
+
+        // 2. Resolve Group Imagery Context
         if (activeStyles.containsKey(groupId)) {
             msgStyle = activeStyles.get(groupId);
-        } else {
-            // For group: pass a group Person as the "user"
-            // Group icon drives the collapsed avatar on Android 9+
-            Person.Builder groupPersonBuilder = new Person.Builder().setName(groupName);
-            if (groupIcon != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                groupPersonBuilder.setIcon(IconCompat.createWithBitmap(groupIcon));
-            } else if (personIcon != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                // Fallback to sender avatar if no group icon
-                groupPersonBuilder.setIcon(IconCompat.createWithBitmap(personIcon));
+
+            // Always try to download/refresh the group icon if provided, otherwise check cache
+            if (!groupIconUrl.isEmpty()) {
+                Bitmap rawGroup = downloadBitmap(groupIconUrl);
+                if (rawGroup != null) {
+                    groupLargeIcon = getCircularBitmap(rawGroup);
+                    groupIconCache.put(groupId, groupLargeIcon);
+                }
             }
-            msgStyle = new NotificationCompat.MessagingStyle(groupPersonBuilder.build());
+            if (groupLargeIcon == null && groupIconCache.containsKey(groupId)) {
+                groupLargeIcon = groupIconCache.get(groupId);
+            }
+        } else {
+            // First time initialization loop
+            Bitmap rawGroupIcon = !groupIconUrl.isEmpty() ? downloadBitmap(groupIconUrl) : null;
+            if (rawGroupIcon != null) {
+                groupLargeIcon = getCircularBitmap(rawGroupIcon);
+                groupIconCache.put(groupId, groupLargeIcon);
+            } else if (circularPersonIcon != null) {
+                groupLargeIcon = circularPersonIcon;
+                groupIconCache.put(groupId, groupLargeIcon);
+            }
+
+            Person userMe = new Person.Builder().setName("Me").setKey("user_me").build();
+            msgStyle = new NotificationCompat.MessagingStyle(userMe);
             msgStyle.setConversationTitle(groupName);
             msgStyle.setGroupConversation(true);
             activeStyles.put(groupId, msgStyle);
@@ -438,14 +440,23 @@ public class FCMService extends FirebaseMessagingService {
 
         applySmallIcon(builder, smallIconBitmap);
 
-        // setLargeIcon drives collapsed avatar on Android 7-8
-        // Use group icon, fall back to sender icon
-        Bitmap collapseIcon = groupIcon != null ? groupIcon : personIcon;
-        if (collapseIcon != null) builder.setLargeIcon(collapseIcon);
+        if (groupLargeIcon != null) {
+            builder.setLargeIcon(groupLargeIcon);
+        } else if (circularPersonIcon != null) {
+            builder.setLargeIcon(circularPersonIcon);
+        }
 
-        publishShortcut(groupId, groupName, sender, tap.raw);
+        // 3. Build a dedicated Person profile for the GROUP shortcut, not the sender
+        Person.Builder groupPersonBuilder = new Person.Builder().setName(groupName).setKey(groupId);
+        if (groupLargeIcon != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            groupPersonBuilder.setIcon(IconCompat.createWithBitmap(groupLargeIcon));
+        }
+        Person groupShortcutPerson = groupPersonBuilder.build();
+
+        // Publish the shortcut bound to the Group's photo identity
+        publishShortcut(groupId, groupName, groupShortcutPerson, tap.raw);
+
         manager.notify(notifId, builder.build());
-        Log.d(TAG, "groupMessage notif id=" + notifId + " group=" + groupId);
     }
 
     // ================================================================
@@ -467,7 +478,6 @@ public class FCMService extends FirebaseMessagingService {
             }
         }
 
-        // Read the style JSON block to preserve target chat routing IDs on tap
         String nsJson = data.getOrDefault(FCM.KEY_NOTIFICATION_STYLE, "");
         if (!nsJson.isEmpty()) {
             try {
@@ -483,9 +493,7 @@ public class FCMService extends FirebaseMessagingService {
                 ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
                 : PendingIntent.FLAG_UPDATE_CURRENT;
 
-        PendingIntent pending = PendingIntent.getActivity(
-                this, requestCode, intent, pendingFlags);
-
+        PendingIntent pending = PendingIntent.getActivity(this, requestCode, intent, pendingFlags);
         return new TapIntents(intent, pending);
     }
 
@@ -515,33 +523,41 @@ public class FCMService extends FirebaseMessagingService {
         }
     }
 
-    /**
-     * Publishes a dynamic shortcut linked to a Person.
-     * Required on API 30+ to show the avatar on the LEFT side
-     * of a collapsed MessagingStyle notification.
-     *
-     * Both the shortcut and notification share the same shortcutId —
-     * that shared ID is what Android uses to render the correct UI.
-     *
-     * Safe to call on API < 30 — ShortcutManagerCompat handles it gracefully.
-     *
-     * @param shortcutId  shared ID between shortcut and notification
-     * @param personName  display name shown under the app icon on long press
-     * @param person      the Person object used in MessagingStyle
-     * @param tapIntent   intent that opens the app when shortcut is tapped
-     */
-    private void publishShortcut(
-            String shortcutId,
-            String personName,
-            Person person,
-            Intent tapIntent) {
+    private Bitmap getCircularBitmap(Bitmap bitmap) {
+        if (bitmap == null) return null;
 
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        int diameter = Math.min(width, height);
+
+        Bitmap output = Bitmap.createBitmap(diameter, diameter, Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(output);
+
+        final int color = 0xff424242;
+        final android.graphics.Paint paint = new android.graphics.Paint();
+        final android.graphics.Rect rect = new android.graphics.Rect(0, 0, diameter, diameter);
+
+        int left = (width - diameter) / 2;
+        int top = (height - diameter) / 2;
+        android.graphics.Rect srcRect = new android.graphics.Rect(left, top, left + diameter, top + diameter);
+
+        paint.setAntiAlias(true);
+        canvas.drawARGB(0, 0, 0, 0);
+        paint.setColor(color);
+
+        canvas.drawCircle(diameter / 2f, diameter / 2f, diameter / 2f, paint);
+        paint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
+        canvas.drawBitmap(bitmap, srcRect, rect, paint);
+
+        return output;
+    }
+
+    // FIXED: Fully removed the 10-character string substring boundary constraint
+    private void publishShortcut(String shortcutId, String personName, Person person, Intent tapIntent) {
         ShortcutInfoCompat.Builder builder = new ShortcutInfoCompat.Builder(this, shortcutId)
                 .setLongLived(true)
                 .setIntent(tapIntent)
-                .setShortLabel(personName.length() > 10
-                        ? personName.substring(0, 10)
-                        : personName)
+                .setShortLabel(personName)
                 .setPerson(person);
 
         // Set shortcut icon from Person's icon if available
@@ -588,15 +604,13 @@ public class FCMService extends FirebaseMessagingService {
     }
 
     private boolean isAppInForeground() {
-        android.app.ActivityManager am =
-                (android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+        android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
         if (am == null) return false;
         List<android.app.ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
         if (procs == null) return false;
         String pkg = getPackageName();
         for (android.app.ActivityManager.RunningAppProcessInfo p : procs) {
-            if (p.processName.equals(pkg) &&
-                    p.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND)
+            if (p.processName.equals(pkg) && p.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND)
                 return true;
         }
         return false;
