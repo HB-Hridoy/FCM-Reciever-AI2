@@ -1,0 +1,279 @@
+<div align="center">
+<h1><kbd>🧩 FCM</kbd></h1>
+An extension for MIT App Inventor 2.<br>
+Firebase Cloud Messaging receiver extension. Developed by Hridoy.
+</div>
+
+## 📝 Specifications
+* **
+📦 **Package:** com.hridoy.fcm
+💾 **Size:** 979.56 KB
+⚙️ **Version:** 1.0.2
+📱 **Minimum API Level:** 14
+📅 **Updated On:** [date=2026-05-26 timezone="Africa/Johannesburg"]
+💻 **Built & documented using:** [FAST](https://community.appinventor.mit.edu/t/fast-an-efficient-way-to-build-publish-extensions/129103?u=jewel) <small><mark>v6.1.0</mark></small>
+
+## <kbd>Events:</kbd>
+**FCM** has total 5 events.
+
+### 1. TokenReceived
+Fired when the FCM token is automatically refreshed by Firebase.
+Send the new token to your server immediately.
+  • token — the new FCM registration token
+
+| Parameter | Type
+| - | - |
+| token | text
+
+### 2. NotificationReceived
+Fired when a notification-type FCM message arrives.
+Always fires in foreground.
+  • from       — sender ID
+  • messageId  — unique message identifier
+  • title      — notification title
+  • body       — notification body text
+  • dataKeys   — list of extra data payload keys
+  • dataValues — list of extra data payload values (same order as keys)
+
+| Parameter | Type
+| - | - |
+| from | text
+| messageId | text
+| style | dictionary
+| data | dictionary
+
+### 3. MessageReceived
+Fired when a data-only FCM message arrives.
+Delivered regardless of app state. No notification is shown.
+  • from       — sender ID
+  • messageId  — unique message identifier
+  • dataKeys   — list of data payload keys
+  • dataValues — list of data payload values (same order as keys)
+
+| Parameter | Type
+| - | - |
+| from | text
+| messageId | text
+| data | dictionary
+
+### 4. AppOpenedFromNotification
+Fired when the user taps a notification and the app opens.
+.
+Two scenarios:
+  • App killed — call GetLaunchNotification() in Screen1.Initialize
+  • App in background — fires automatically via onResume
+.
+  • messageId    — ID of the tapped notification
+  • data     — data payload
+
+| Parameter | Type
+| - | - |
+| messageId | text
+| data | dictionary
+
+### 5. ErrorOccurred
+Fired when any FCM operation fails outside of a callback context.
+  • operation — name of the method that failed
+  • message   — error description
+
+| Parameter | Type
+| - | - |
+| operation | text
+| message | text
+
+## <kbd>Methods:</kbd>
+**FCM** has total 11 methods.
+
+### 1. Initialize
+Initializes Firebase with your project credentials.
+Call this once at app startup before any other FCM method.
+.
+===============================================================
+.
+Parameters from Firebase Console → Project Settings:
+  • apiKey        — Web API key
+  • applicationId — App ID (e.g. 1:123:android:abc)
+  • projectId     — Project ID (e.g. my-app-123)
+  • senderId      — Sender ID / Cloud Messaging number
+  • storageBucket — Storage bucket (e.g. my-app.appspot.com)
+.
+===============================================================
+.
+Callback parameters:
+  1) status       (boolean: true = success, false = failure)
+  2) errorMessage (text: empty if success)
+
+| Parameter | Type
+| - | - |
+| apiKey | text
+| applicationId | text
+| projectId | text
+| senderId | text
+| callback | any
+
+### 2. GetLaunchNotification
+Call this in Screen1.Initialize to check if the app was opened
+by tapping a notification while the app was killed or in background.
+.
+===============================================================
+.
+Reads the current launch Intent directly — no static storage,
+works correctly with multiple notifications.
+.
+If the app was opened from a notification tap, fires
+AppOpenedFromNotification immediately.
+If the app was opened normally, does nothing.
+.
+Recommended call order in Screen1.Initialize:
+  1. call FCM.Initialize(...)
+  2. call FCM.GetLaunchNotification()
+  3. call FCM.GetToken(...)
+
+### 3. SetNotificationChannel
+Configures the Android notification channel for all FCM notifications.
+Call before the first notification is displayed.
+No-op on Android 7 and below.
+.
+===============================================================
+.
+Parameters:
+  • channelId          — unique ID (e.g. 'my_channel')
+  • channelName        — name shown in system settings
+  • channelDescription — description shown in system settings
+
+| Parameter | Type
+| - | - |
+| channelId | text
+| channelName | text
+| channelDescription | text
+
+### 4. GetToken
+Retrieves the current FCM registration token from Firebase.
+Always fetch fresh before sending to your server.
+.
+===============================================================
+.
+Callback parameters:
+  1) token        (text: FCM token, empty if failed)
+  2) errorMessage (text: empty if success)
+
+| Parameter | Type
+| - | - |
+| callback | any
+
+### 5. GetCachedToken
+Returns the last known FCM token from local cache.
+Returns empty string if no token has been fetched yet.
+Use GetToken() to retrieve a fresh token from Firebase.
+
+* Return type: `text`
+
+### 6. SubscribeToTopic
+Subscribes this device to an FCM topic.
+Checks local cache first — skips Firebase call if already subscribed.
+Topic names must match [a-zA-Z0-9-_.~%] and be under 900 chars.
+.
+===============================================================
+.
+Callback parameters:
+  1) status       (boolean: true = success, false = failure)
+  2) topic        (text: the topic name)
+  3) errorMessage (text: empty if success)
+
+| Parameter | Type
+| - | - |
+| topic | text
+| callback | any
+
+### 7. UnsubscribeFromTopic
+Unsubscribes this device from an FCM topic.
+.
+===============================================================
+.
+Callback parameters:
+  1) status       (boolean: true = success, false = failure)
+  2) topic        (text: the topic name)
+  3) errorMessage (text: empty if success)
+
+| Parameter | Type
+| - | - |
+| topic | text
+| callback | any
+
+### 8. SubscribedTopics
+Returns the list of topics this device is currently subscribed to.
+Reads from local cache — no network request.
+Returns empty list if not subscribed to any topics.
+
+* Return type: `list`
+
+### 9. DeleteToken
+Deletes the current FCM registration token.
+Use on user logout to stop receiving targeted notifications.
+A new token is generated on the next GetToken() call.
+.
+===============================================================
+.
+Callback parameters:
+  1) status       (boolean: true = success, false = failure)
+  2) errorMessage (text: empty if success)
+
+| Parameter | Type
+| - | - |
+| callback | any
+
+### 10. RequestNotificationPermission
+Requests POST_NOTIFICATIONS runtime permission on Android 13+.
+No-op on Android 12 and below.
+Call from a button click — not from Screen.Initialize.
+.
+===============================================================
+.
+Callback parameters:
+  1) granted      (boolean: true = already granted, false = dialog shown)
+  2) errorMessage (text: empty if already granted)
+.
+Call IsNotificationPermissionGranted() after user responds to get the result.
+
+### 11. IsNotificationPermissionGranted
+Returns true if POST_NOTIFICATIONS permission is granted.
+Always returns true on Android 12 and below.
+
+* Return type: `boolean`
+
+## <kbd>Designer:</kbd>
+**FCM** has total 1 designer property.
+
+### 1. ShowForegroundNotifications
+
+* Input type: `boolean`
+* Default value: `True`
+
+## <kbd>Setter:</kbd>
+**FCM** has total 1 setter property.
+
+### 1. ShowForegroundNotifications
+Controls whether notifications are shown when the app is in foreground.
+Resets to true each session — call in Screen.Initialize to change.
+.
+===============================================================
+.
+ • true = show notification (default)
+ • false = suppress, only fire NotificationReceived event
+
+* Input type: `boolean`
+
+## <kbd>Getter:</kbd>
+**FCM** has total 1 getter property.
+
+### 1. ShowForegroundNotifications
+Controls whether notifications are shown when the app is in foreground.
+Resets to true each session — call in Screen.Initialize to change.
+.
+===============================================================
+.
+ • true = show notification (default)
+ • false = suppress, only fire NotificationReceived event
+
+* Return type: `boolean`
+

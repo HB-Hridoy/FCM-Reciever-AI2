@@ -26,8 +26,8 @@ import java.lang.ref.WeakReference;
 import java.util.*;
 
 @DesignerComponent(
-		version = 80,
-		versionName = "1.0.2",
+		version = 100,
+		versionName = "2.0.0",
 		description = "Firebase Cloud Messaging receiver extension. Developed by Hridoy.",
 		iconName = "icon.png"
 )
@@ -42,7 +42,10 @@ public class FCM extends AndroidNonvisibleComponent
 	static final String KEY_TITLE      = "fcm_title";
 	static final String KEY_BODY       = "fcm_body";
 	static final String KEY_IMAGE      = "fcm_image";
+	static final String KEY_SMALL_ICON = "fcm_small_icon";
+	static final String KEY_LARGE_ICON = "fcm_large_icon";
 	static final String KEY_MESSAGE_ID = "fcm_message_id";
+	static final String KEY_NOTIFICATION_STYLE = "fcm_notification_style";
 
 	// Internal FCM extras added by the system — filtered from data payloads
 	private static final List<String> SYSTEM_KEYS = Arrays.asList(
@@ -51,7 +54,7 @@ public class FCM extends AndroidNonvisibleComponent
 			KEY_MESSAGE_ID, "gcm.notification.body", "gcm.notification.title",
 			"gcm.notification.image", "android.support.content.wakelockid",
 			"androidx.content.wakelockid",
-			KEY_TITLE, KEY_BODY, KEY_IMAGE
+			KEY_TITLE, KEY_BODY, KEY_IMAGE, KEY_SMALL_ICON, KEY_LARGE_ICON, KEY_NOTIFICATION_STYLE
 	);
 
 	// Notification channel config
@@ -101,7 +104,6 @@ public class FCM extends AndroidNonvisibleComponent
 					"  • applicationId — App ID (e.g. 1:123:android:abc)\n" +
 					"  • projectId     — Project ID (e.g. my-app-123)\n" +
 					"  • senderId      — Sender ID / Cloud Messaging number\n" +
-					"  • storageBucket — Storage bucket (e.g. my-app.appspot.com)\n" +
 					".\n===============================================================\n.\n" +
 					"Callback parameters:\n" +
 					"  1) status       (boolean: true = success, false = failure)\n" +
@@ -280,7 +282,7 @@ public class FCM extends AndroidNonvisibleComponent
 	@SimpleFunction(description =
 			"Subscribes this device to an FCM topic.\n" +
 					"Checks local cache first — skips Firebase call if already subscribed.\n" +
-					"Topic names must match [a-zA-Z0-9-_.~%] and be under 900 chars.\n" +
+					"Topic names must match [a-zA-Z0-9] and be under 900 chars.\n" +
 					".\n===============================================================\n.\n" +
 					"Callback parameters:\n" +
 					"  1) status       (boolean: true = success, false = failure)\n" +
@@ -441,23 +443,18 @@ public class FCM extends AndroidNonvisibleComponent
 					"Always fires in foreground.\n" +
 					"  • from       — sender ID\n" +
 					"  • messageId  — unique message identifier\n" +
-					"  • title      — notification title\n" +
-					"  • body       — notification body text\n" +
-					"  • dataKeys   — list of extra data payload keys\n" +
-					"  • dataValues — list of extra data payload values (same order as keys)")
-	public void NotificationReceived(String from, String messageId,
-									 String title, String body, YailDictionary data) {
-		EventDispatcher.dispatchEvent(this, "NotificationReceived",
-				from, messageId, title, body, data);
+					"  • style      — dictionary of notification style\n" +
+					"  • data   — list of extra data payload")
+	public void NotificationReceived(String from, String messageId,YailDictionary style, YailDictionary data) {
+		EventDispatcher.dispatchEvent(this, "NotificationReceived", from, messageId, style, data);
 	}
 
 	@SimpleEvent(description =
 			"Fired when a data-only FCM message arrives.\n" +
 					"Delivered regardless of app state. No notification is shown.\n" +
 					"  • from       — sender ID\n" +
-					"  • messageId  — unique message identifier\n" +
-					"  • dataKeys   — list of data payload keys\n" +
-					"  • dataValues — list of data payload values (same order as keys)")
+					"  • messageId  — unique message identifier\n"+
+					"  • data   — list of extra data payload")
 	public void MessageReceived(String from, String messageId,
 								YailDictionary data) {
 		EventDispatcher.dispatchEvent(this, "MessageReceived",
@@ -518,13 +515,12 @@ public class FCM extends AndroidNonvisibleComponent
 	static void dispatchNotificationReceived(
 			final String from,
 			final String messageId,
-			final String title,
-			final String body,
+			final YailDictionary style,
 			final YailDictionary dataDict) {
 		FCM ext = getActiveInstance();
 		if (ext == null) return;
 		ext.mainHandler.post(() ->
-				ext.NotificationReceived(from, messageId, title, body, dataDict));
+				ext.NotificationReceived(from, messageId, style, dataDict));
 	}
 
 	/**
@@ -609,6 +605,14 @@ public class FCM extends AndroidNonvisibleComponent
 		if (messageId == null) messageId = intent.getStringExtra(KEY_MESSAGE_ID);
 		if (messageId == null) messageId = "unknown";
 
+		// Clear messaging style state so next message starts fresh
+		// personId is stored as extra for individualMessage taps
+		// groupId is stored as extra for groupMessage taps
+		String personId = intent.getStringExtra("fcm_person_id");
+		String groupId  = intent.getStringExtra("fcm_group_id");
+		if (personId != null && !personId.isEmpty()) FCMService.clearConversation(personId);
+		if (groupId  != null && !groupId.isEmpty())  FCMService.clearConversation(groupId);
+
 		YailDictionary dataDict = new YailDictionary();
 		for (String key : intent.getExtras().keySet()) {
 			if (!SYSTEM_KEYS.contains(key)) {
@@ -617,14 +621,10 @@ public class FCM extends AndroidNonvisibleComponent
 			}
 		}
 
-		final YailDictionary finalDict  = dataDict;
+		final String         finalId   = messageId;
+		final YailDictionary finalDict = dataDict;
 
-		final String   finalId     = messageId;
-
-		Log.d(TAG, "AppOpenedFromNotification: " + finalId );
-
-		mainHandler.post(() ->
-				AppOpenedFromNotification(finalId, finalDict));
+		mainHandler.post(() -> AppOpenedFromNotification(finalId, finalDict));
 	}
 
 	// ================================================================
@@ -695,9 +695,9 @@ public class FCM extends AndroidNonvisibleComponent
 			fireCallback(cb, Boolean.FALSE, "", "Topic name cannot be empty");
 			return false;
 		}
-		if (!topic.matches("[a-zA-Z0-9\\-_.~%]+")) {
+		if (!topic.matches("[a-zA-Z0-9]+")) {
 			fireCallback(cb, Boolean.FALSE, topic,
-					"Invalid topic name. Must match [a-zA-Z0-9-_.~%]");
+					"Invalid topic name. Must match [a-zA-Z0-9]");
 			return false;
 		}
 		if (topic.length() > 900) {
