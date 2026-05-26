@@ -22,12 +22,14 @@ import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
 import com.google.appinventor.components.runtime.util.YailDictionary;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -112,8 +114,7 @@ public class FCMService extends FirebaseMessagingService {
     // ================================================================
 
     private void processMessage(String from, String messageId, Map<String, String> data) {
-        boolean isNotification = data.containsKey(FCM.KEY_TITLE)
-                || data.containsKey(FCM.KEY_NOTIFICATION_STYLE);
+        boolean isNotification = data.containsKey(FCM.KEY_NOTIFICATION_STYLE);
 
         // Build clean user data dict — strip all system keys
         YailDictionary dataDict = new YailDictionary();
@@ -124,12 +125,27 @@ public class FCMService extends FirebaseMessagingService {
         }
 
         if (isNotification) {
-            String title = data.getOrDefault(FCM.KEY_TITLE, "");
-            String body  = data.getOrDefault(FCM.KEY_BODY,  "");
 
+            // Build clean notification style data dict
+            String notificationStyleJson = data.get(FCM.KEY_NOTIFICATION_STYLE);
+            YailDictionary styleDict = new YailDictionary();
+
+            if (notificationStyleJson != null && !notificationStyleJson.isEmpty()) {
+                try {
+                    JSONObject json = new JSONObject(notificationStyleJson);
+
+                    Iterator<String> keys = json.keys();
+                    while (keys.hasNext()) {
+                        String key = keys.next();
+                        styleDict.put(key, json.optString(key, ""));
+                    }
+                } catch (JSONException e) {
+                    Log.e(TAG, "Failed to parse notificationStyle: " + notificationStyleJson, e);
+                }
+            }
 
             // Dispatch event to blocks (posts to main thread internally)
-            FCM.dispatchNotificationReceived(from, messageId, title, body, dataDict);
+            FCM.dispatchNotificationReceived(from, messageId, styleDict, dataDict);
 
             if (!isAppInForeground() || FCM.shouldShowForegroundNotification()) {
                 showNotification(messageId, data);

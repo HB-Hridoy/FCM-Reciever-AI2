@@ -26,8 +26,8 @@ import java.lang.ref.WeakReference;
 import java.util.*;
 
 @DesignerComponent(
-		version = 93,
-		versionName = "1.0.2",
+		version = 100,
+		versionName = "2.0.0",
 		description = "Firebase Cloud Messaging receiver extension. Developed by Hridoy.",
 		iconName = "icon.png"
 )
@@ -104,7 +104,6 @@ public class FCM extends AndroidNonvisibleComponent
 					"  • applicationId — App ID (e.g. 1:123:android:abc)\n" +
 					"  • projectId     — Project ID (e.g. my-app-123)\n" +
 					"  • senderId      — Sender ID / Cloud Messaging number\n" +
-					"  • storageBucket — Storage bucket (e.g. my-app.appspot.com)\n" +
 					".\n===============================================================\n.\n" +
 					"Callback parameters:\n" +
 					"  1) status       (boolean: true = success, false = failure)\n" +
@@ -283,7 +282,7 @@ public class FCM extends AndroidNonvisibleComponent
 	@SimpleFunction(description =
 			"Subscribes this device to an FCM topic.\n" +
 					"Checks local cache first — skips Firebase call if already subscribed.\n" +
-					"Topic names must match [a-zA-Z0-9-_.~%] and be under 900 chars.\n" +
+					"Topic names must match [a-zA-Z0-9] and be under 900 chars.\n" +
 					".\n===============================================================\n.\n" +
 					"Callback parameters:\n" +
 					"  1) status       (boolean: true = success, false = failure)\n" +
@@ -444,23 +443,18 @@ public class FCM extends AndroidNonvisibleComponent
 					"Always fires in foreground.\n" +
 					"  • from       — sender ID\n" +
 					"  • messageId  — unique message identifier\n" +
-					"  • title      — notification title\n" +
-					"  • body       — notification body text\n" +
-					"  • dataKeys   — list of extra data payload keys\n" +
-					"  • dataValues — list of extra data payload values (same order as keys)")
-	public void NotificationReceived(String from, String messageId,
-									 String title, String body, YailDictionary data) {
-		EventDispatcher.dispatchEvent(this, "NotificationReceived",
-				from, messageId, title, body, data);
+					"  • style      — dictionary of notification style\n" +
+					"  • data   — list of extra data payload")
+	public void NotificationReceived(String from, String messageId,YailDictionary style, YailDictionary data) {
+		EventDispatcher.dispatchEvent(this, "NotificationReceived", from, messageId, style, data);
 	}
 
 	@SimpleEvent(description =
 			"Fired when a data-only FCM message arrives.\n" +
 					"Delivered regardless of app state. No notification is shown.\n" +
 					"  • from       — sender ID\n" +
-					"  • messageId  — unique message identifier\n" +
-					"  • dataKeys   — list of data payload keys\n" +
-					"  • dataValues — list of data payload values (same order as keys)")
+					"  • messageId  — unique message identifier\n"+
+					"  • data   — list of extra data payload")
 	public void MessageReceived(String from, String messageId,
 								YailDictionary data) {
 		EventDispatcher.dispatchEvent(this, "MessageReceived",
@@ -521,13 +515,12 @@ public class FCM extends AndroidNonvisibleComponent
 	static void dispatchNotificationReceived(
 			final String from,
 			final String messageId,
-			final String title,
-			final String body,
+			final YailDictionary style,
 			final YailDictionary dataDict) {
 		FCM ext = getActiveInstance();
 		if (ext == null) return;
 		ext.mainHandler.post(() ->
-				ext.NotificationReceived(from, messageId, title, body, dataDict));
+				ext.NotificationReceived(from, messageId, style, dataDict));
 	}
 
 	/**
@@ -702,9 +695,9 @@ public class FCM extends AndroidNonvisibleComponent
 			fireCallback(cb, Boolean.FALSE, "", "Topic name cannot be empty");
 			return false;
 		}
-		if (!topic.matches("[a-zA-Z0-9\\-_.~%]+")) {
+		if (!topic.matches("[a-zA-Z0-9]+")) {
 			fireCallback(cb, Boolean.FALSE, topic,
-					"Invalid topic name. Must match [a-zA-Z0-9-_.~%]");
+					"Invalid topic name. Must match [a-zA-Z0-9]");
 			return false;
 		}
 		if (topic.length() > 900) {
